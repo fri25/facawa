@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>FeCAWa 2026 – Festival Culturel et Artistique Waama (3ᵉ édition) | Don & Souscription en ligne</title>
+  
+  <meta name="description" content="Participez à la souscription officielle pour le Festival Culturel et Artistique Waama (FeCAWa 2026), 3ᵉ édition du 19 au 21 novembre 2026 à Toucoutouna. Don sécurisé par MTN, Moov, Celtis et Carte Bancaire.">
+  <meta name="theme-color" content="#C85A32">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="FeCAWa 2026 – Appel à souscription 3ᵉ édition">
+  <meta property="og:description" content="Soutenez la 3ᵉ édition du Festival Culturel et Artistique Waama du 19 au 21 novembre 2026. Don sécurisé par Mobile Money.">
+  <meta property="og:image" content="/assets/logo.jpeg">
+  <meta property="og:type" content="website">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/css/style.css">
+
+  <!-- FedaPay Checkout.js (Officiel) -->
+  <script src="https://cdn.fedapay.com/checkout.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <a href="/" class="brand-link" aria-label="FeCAWa 2026 Accueil">
+          <div class="brand-mark">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'" />
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">FeCAWa</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="/" class="nav-link active">Accueil</a>
+        <button type="button" class="btn-header-donate open-modal-btn" id="openModalHeaderBtn">Je participe</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-wrapper">
+    <section class="hero-section">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <div class="festival-mark">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'" />
+          </div>
+          <h1>Festival Culturel et Artistique des Waaba</h1>
+          <p>Ensemble, faisons rayonner la culture Waaba. Chaque contribution renforce un festival porté par sa communauté. Rejoignez la mobilisation.</p>
+        </div>
+
+        <div class="hero-metrics" aria-label="Statistiques de souscription">
+          <p class="metric-label">Montant total des souscriptions</p>
+          <p class="metric-total" id="metricTotal">0 FCFA</p>
+
+          <div class="metric-row">
+            <div>
+              <strong id="metricDonors">0</strong>
+              <span>participants</span>
+            </div>
+            <div>
+              <strong id="metricRaised">0</strong>
+              <span>FCFA mobilisés</span>
+            </div>
+          </div>
+
+          <div class="goal-row">
+            <span id="metricGoalLabel">Objectif : 1 000 000 FCFA</span>
+            <span id="metricPercent">0.0 % de l'objectif atteint</span>
+          </div>
+          <div class="progress-bar" aria-hidden="true">
+            <span id="metricProgressBar" style="width: 0%;"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <button type="button" class="btn-hero-donate open-modal-btn" id="openModalHeroBtn">JE PARTICIPE</button>
+        <p>Chaque contribution compte. Rejoignez la mobilisation.</p>
+      </div>
+    </section>
+
+    <section class="feature-grid" aria-label="Avantages du festival">
+      <article class="feature-card">
+        <div class="feature-icon">✦</div>
+        <h3>Une mobilisation collective</h3>
+        <p>Chaque souscription finance directement l'organisation du festival.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">✓</div>
+        <h3>Paiement sécurisé</h3>
+        <p>Les paiements sont traités par FedaPay et vérifiés côté serveur.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">◎</div>
+        <h3>Transparence totale</h3>
+        <p>Le montant total et la liste des participants sont mis à jour en direct.</p>
+      </article>
+    </section>
+
+    <section class="participants-section" id="participants">
+      <div class="section-heading">
+        <div>
+          <h2>Ils participent à FeCAWa</h2>
+          <p>Dernières souscriptions confirmées en direct.</p>
+        </div>
+      </div>
+
+      <div class="participants-feed" id="recentDonorsFeed">
+        <div class="participants-list">
+          <p class="empty-state-line">Chargement des souscriptions...</p>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 22px;">
+        <button type="button" class="btn-secondary-action open-modal-btn">
+          Rejoindre les souscripteurs de FeCAWa →
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==========================================================================
+       Panneau Modal de Souscription (Déclenché par "Je participe")
+       ========================================================================== -->
+  <div id="donationModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-header-info">
+          <span class="modal-pill">FeCAWa 2026 • 3ᵉ édition</span>
+          <h2 class="modal-title" id="modalTitle">Formulaire de souscription</h2>
+          <p class="modal-subtitle">Paiement Mobile Money ou Carte bancaire instantané</p>
+        </div>
+        <button type="button" class="modal-close-btn" id="closeModalBtn" aria-label="Fermer le formulaire">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-payment-highlight">
+          <div class="form-payment-title-row">
+            <span class="fp-title">Options de règlement disponibles</span>
+            <span class="fp-instant">Validation immédiate</span>
+          </div>
+          <div class="payment-methods-chips prominent">
+            <span class="payment-chip mtn">MTN MoMo</span>
+            <span class="payment-chip moov">Moov Money</span>
+            <span class="payment-chip celtis">Celtis Cash</span>
+            <span class="payment-chip card">Carte bancaire</span>
+          </div>
+        </div>
+
+        <form id="donationForm" novalidate>
+          <div class="form-group amount-selection-group">
+            <label class="form-label" for="amountInput">
+              <span>Choisissez le montant de votre don <span class="required">*</span></span>
+              <small>Minimum 100 FCFA</small>
+            </label>
+            <div class="input-currency-wrapper">
+              <input type="number" id="amountInput" class="form-control" value="5000" min="100" step="500" placeholder="Ou saisissez un autre montant..." required>
+              <span class="currency-badge">FCFA</span>
+            </div>
+          </div>
+
+          <div class="form-section-title">Vos coordonnées</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="firstname" class="form-label">Prénom(s) <span class="required">*</span></label>
+              <input type="text" id="firstname" class="form-control" placeholder="Ex. Chabi, Bio, Marie" required autocomplete="given-name">
+            </div>
+
+            <div class="form-group">
+              <label for="lastname" class="form-label">Nom <span class="required">*</span></label>
+              <input type="text" id="lastname" class="form-control" placeholder="Ex. Kora, Sabi, Dupont" required autocomplete="family-name">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="phone" class="form-label">Numéro de téléphone <span class="required">*</span></label>
+              <input type="tel" id="phone" class="form-control" placeholder="Ex. 61 00 00 00 ou +229..." required autocomplete="tel">
+            </div>
+
+            <div class="form-group">
+              <label for="email" class="form-label">Adresse email <small>(optionnel)</small></label>
+              <input type="email" id="email" class="form-control" placeholder="Pour recevoir votre facture" autocomplete="email">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="message" class="form-label">Message de soutien <small>(optionnel)</small></label>
+            <textarea id="message" class="form-control" rows="2" maxlength="500" placeholder="Ex. Longue vie à la culture Waama !"></textarea>
+          </div>
+
+          <div class="form-group form-privacy">
+            <label class="checkbox-card">
+              <input type="checkbox" id="isPublicCheckbox" checked>
+              <div>
+                <div class="checkbox-label-text">Afficher mon nom dans la liste publique des donateurs</div>
+                <div class="checkbox-desc">Pour honorer votre contribution et encourager toute la communauté.</div>
+              </div>
+            </label>
+
+            <label class="checkbox-card" id="hideAmountCard">
+              <input type="checkbox" id="hideAmountCheckbox">
+              <div>
+                <div class="checkbox-label-text">Masquer le montant de mon don publiquement</div>
+                <div class="checkbox-desc">Votre nom apparaîtra parmi les soutiens, mais le montant restera confidentiel.</div>
+              </div>
+            </label>
+          </div>
+
+          <div class="donate-action-container">
+            <button type="submit" id="donateBtn" class="btn-donate">
+              <span id="donateSpinner" class="spinner hidden"></span>
+              <span id="donateBtnText">Faire un don avec FedaPay</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+            </button>
+            <div class="donate-security-footnote">🔒 Transaction chiffrée SSL • Pas de frais cachés • Facture instantanée</div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <a href="/" class="brand-link" style="color: inherit;">
+          <div class="brand-mark light">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'" />
+          </div>
+        </a>
+        <h4>Festival Culturel et Artistique des Waaba</h4>
+        <p>Ensemble, faisons rayonner la culture Waaba.</p>
+      </div>
+
+      <div class="footer-col">
+        <h5>Navigation</h5>
+        <ul class="footer-links">
+          <li><a href="/">Accueil</a></li>
+          <li><a href="#donner" class="open-modal-btn">Faire un don</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Contact</h5>
+        <p>(+229) 01 66 54 76 09</p>
+        <p>Une initiative portée par Le comité d'organisation du FeCAWa</p>
+      </div>
+    </div>
+
+    <div class="footer-bottom">© 2026 FeCAWa. Tous droits réservés.</div>
+  </footer>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

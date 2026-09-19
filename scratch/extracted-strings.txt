@@ -1,0 +1,11 @@
+Ensemble, faisons rayonner la culture Waaba.
+Chaque contribution renforce un festival porté par sa communauté. Rejoignez la mobilisation.
+organisation du FeCAWa
+${r_.shortName} — Souscriptions pour ${r_.fullName}
+Découvrez le montant déjà mobilisé pour le ${r_.fullName} et participez à votre tour.
+Confirmation de votre souscription au ${r_.fullName}.
+Merci pour votre participation à ${r_.shortName}
+Votre contribution au ${r_.fullName} a été enregistrée.
+Renseignez votre souscription au ${r_.fullName} et réglez votre contribution en ligne de façon sécurisée.
+Je participe à ${r_.shortName}
+Formulaire officiel de souscription au ${r_.fullName}.

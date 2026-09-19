@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>FeCAWa 2026 – Tableau d'Honneur des Généreux Souscripteurs</title>
+  
+  <meta name="description" content="Découvrez les généreux donateurs et soutiens de la 3ᵉ édition du Festival Culturel et Artistique Waama (19 au 21 novembre 2026 à Toucoutouna).">
+  <meta name="theme-color" content="#C85A32">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="subscribers-page">
+
+  <!-- En-tête officiel unifié -->
+  <header class="site-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <a href="/" class="brand-link">
+          <div class="brand-mark">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'">
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">FeCAWa</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="/" class="nav-link">Accueil</a>
+        <a href="/souscripteurs.html" class="nav-link active">Souscripteurs</a>
+        <a href="/#donner" class="btn-header-donate">Je participe</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Contenu Principal -->
+  <main class="main-wrapper">
+
+    <!-- En-tête de la page / Hero -->
+    <div class="subscribers-header-hero">
+      <div class="edition-badge">
+        🙏 Honneur & Gratitude
+      </div>
+      <h1 class="subscribers-hero-title">
+        Tableau des Généreux Souscripteurs
+      </h1>
+      <p class="subscribers-hero-lead">
+        Merci du fond du cœur à tous ceux qui, de près ou de loin, soutiennent la valorisation et la perpétuation 
+        de la culture Waama pour cette 3ᵉ édition historique à Toucoutouna.
+      </p>
+
+      <!-- Cartes de résumé chiffré -->
+      <div class="subscribers-stats-row">
+        <div class="sub-stat-card">
+          <div class="sub-stat-val" id="totalDonorsBadge">0</div>
+          <div class="sub-stat-label">Souscripteurs</div>
+        </div>
+        <div class="sub-stat-card">
+          <div class="sub-stat-val" id="totalAmountBadge">0 FCFA</div>
+          <div class="sub-stat-label">Total Mobilisé</div>
+        </div>
+        <div class="sub-stat-card">
+          <div class="sub-stat-val" id="maxDonationBadge">0 FCFA</div>
+          <div class="sub-stat-label">Plus Grand Don</div>
+        </div>
+      </div>
+
+      <!-- Barre de recherche en direct & Filtres rapides -->
+      <div class="subscribers-controls">
+        <div class="search-bar-inner">
+          <svg class="search-bar-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" class="search-input-field" placeholder="Rechercher par nom de donateur ou mot-clé..." autocomplete="off">
+          <button type="button" id="searchClearBtn" class="search-clear-btn hidden" title="Effacer la recherche">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        <div class="subscribers-filter-bar">
+          <div class="filter-chips-wrap">
+            <button type="button" class="filter-chip active" data-filter="all">Tous</button>
+            <button type="button" class="filter-chip" data-filter="top">🏆 Plus grands dons</button>
+            <button type="button" class="filter-chip" data-filter="recent">🕒 Plus récents</button>
+            <button type="button" class="filter-chip" data-filter="messages">💬 Avec message</button>
+          </div>
+          <span id="subscribersCount" class="subscribers-count-tag">Chargement des soutiens...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flux dynamique des souscripteurs -->
+    <div style="max-width: 820px; margin: 0 auto;">
+      <div id="subscribersList" class="subscribers-feed">
+        <div style="text-align: center; padding: 3rem 0;">
+          <div class="spinner-pending"></div>
+          <p style="margin-top: 12px; color: var(--muted); font-size: 0.95rem;">Chargement des généreux donateurs...</p>
+        </div>
+      </div>
+
+      <!-- État vide si aucune souscription trouvée -->
+      <div id="emptyState" class="subscribers-empty-box hidden">
+        <div class="empty-icon-wrap">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <h3 class="empty-title">Aucun donateur trouvé</h3>
+        <p class="empty-desc">
+          Soyez le premier à soutenir cette 3ᵉ édition du FeCAWa ou modifiez vos critères de recherche.
+        </p>
+        <a href="/#donner" class="btn-primary-action">
+          Faire un don maintenant
+        </a>
+      </div>
+
+      <!-- Bouton de pagination -->
+      <div class="load-more-section">
+        <button id="loadMoreBtn" class="btn-secondary-action hidden">
+          Charger plus de donateurs
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Pied de page officiel -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <a href="/" class="brand-link" style="color: inherit;">
+          <div class="brand-mark light">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'" />
+          </div>
+        </a>
+        <h4>Festival Culturel et Artistique des Waaba</h4>
+        <p>Ensemble, faisons rayonner la culture Waaba.</p>
+      </div>
+
+      <div class="footer-col">
+        <h5>Navigation</h5>
+        <ul class="footer-links">
+          <li><a href="/">Accueil</a></li>
+          <li><a href="/souscripteurs.html">Souscripteurs</a></li>
+          <li><a href="/#donner">Faire un don</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Contact</h5>
+        <p>(+229) 01 66 54 76 09</p>
+        <p>Une initiative portée par Le comité d'organisation du FeCAWa</p>
+      </div>
+    </div>
+
+    <div class="footer-bottom">© 2026 FeCAWa. Tous droits réservés.</div>
+  </footer>
+
+  <!-- Script JS Dédié -->
+  <script src="/js/subscribers.js"></script>
+</body>
+</html>

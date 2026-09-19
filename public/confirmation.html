@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>FeCAWa 2026 – Confirmation de Souscription & Reçu Officiel</title>
+  
+  <meta name="description" content="Confirmation de paiement et reçu officiel pour votre souscription au Festival Culturel et Artistique Waama (FeCAWa 2026).">
+  <meta name="theme-color" content="#C85A32">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+
+  <!-- Stylesheet unifiée -->
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="confirmation-page">
+
+  <!-- En-tête officiel identique au site -->
+  <header class="site-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <a href="/" class="brand-link">
+          <div class="brand-mark">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'">
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">FeCAWa</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="/" class="nav-link">Accueil</a>
+        <a href="/#donner" class="btn-header-donate">Je participe</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Contenu Principal -->
+  <main class="confirmation-main">
+    <div class="confirmation-wrapper">
+      
+      <div class="confirmation-card" id="confirmationCard">
+        
+        <!-- Icône de Statut Dynamique -->
+        <div class="confirmation-icon-wrap success" id="statusIconWrap">
+          <svg id="statusIconSvg" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </div>
+
+        <!-- Titre & Sous-titre Principaux -->
+        <h1 class="confirmation-title" id="confirmationTitle">
+          Paiement confirmé avec succès !
+        </h1>
+        <p class="confirmation-subtitle" id="confirmationSubtitle">
+          Votre contribution a été enregistrée avec succès et participe directement à la réussite du Festival Culturel et Artistique Waama.
+        </p>
+
+        <!-- Bannière Montant (Paiement Validé) -->
+        <div class="confirmation-amount-banner" id="amountBanner">
+          <span class="amount-value" id="bannerAmount">0</span>
+          <span class="amount-currency">FCFA</span>
+        </div>
+
+        <!-- Bénédiction Spirituelle (Préservée pour l'âme du festival et les tests) -->
+        <div class="blessing-banner" id="blessingBanner">
+          <div class="blessing-quote">« Que Dieu bénisse ces généreux donateurs »</div>
+          <div class="blessing-sub">
+            Barka ! Mi tche kpaa ! Votre don est 100% effectif et comptabilisé dans la cagnotte officielle du festival.
+          </div>
+        </div>
+
+        <!-- Boîte d'Alerte Contextuelle (Mobile Money PIN / Refus) -->
+        <div class="status-alert-box hidden" id="statusAlertBox"></div>
+
+        <!-- Reçu Officiel Récapitulatif -->
+        <div class="receipt-card" id="receiptCard">
+          <div class="receipt-header">
+            <span id="receiptHeaderTitle">Reçu officiel de souscription</span>
+            <span class="receipt-badge" id="receiptStatusBadge">Validé & Encaissé</span>
+          </div>
+
+          <!-- Spinner d'attente lors de la vérification -->
+          <div id="receiptLoading" class="hidden" style="text-align: center; padding: 24px 12px;">
+            <div class="spinner-pending"></div>
+            <p style="margin-top: 14px; color: var(--muted); font-size: 0.95rem; font-weight: 500;" id="loadingMessage">
+              Contrôle du débit effectif auprès de votre opérateur...
+            </p>
+          </div>
+
+          <!-- Lignes détaillées du reçu -->
+          <div class="receipt-body" id="receiptDetails">
+            <div class="receipt-row">
+              <span class="receipt-label">Référence du don</span>
+              <span class="receipt-val" id="receiptRef">-</span>
+            </div>
+            <div class="receipt-row">
+              <span class="receipt-label">Donateur</span>
+              <span class="receipt-val" id="receiptDonor">-</span>
+            </div>
+            <div class="receipt-row">
+              <span class="receipt-label">Montant</span>
+              <span class="receipt-val amount-highlight" id="receiptAmount">-</span>
+            </div>
+            <div class="receipt-row">
+              <span class="receipt-label">Date & Heure</span>
+              <span class="receipt-val" id="receiptDate">-</span>
+            </div>
+            <div class="receipt-row">
+              <span class="receipt-label">Édition</span>
+              <span class="receipt-val">FeCAWa 2026 — 3ᵉ Édition</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions Principales -->
+        <div class="confirmation-actions" id="confirmationActions">
+          <button type="button" class="btn-secondary-action" id="printBtn" onclick="window.print()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            Imprimer le reçu
+          </button>
+
+          <a href="#" id="shareWhatsappBtn" class="btn-whatsapp-action" target="_blank" rel="noopener noreferrer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+            Partager sur WhatsApp
+          </a>
+
+          <a href="/" class="btn-secondary-action" id="homeBtn">
+            Retour à l'accueil
+          </a>
+
+          <a href="/#donner" id="retryBtn" class="btn-retry-action hidden">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+            Recommencer le don
+          </a>
+
+          <a href="/#donner" id="donateNowBtn" class="btn-primary-action hidden">
+            Faire un don maintenant
+          </a>
+        </div>
+
+        <div class="subscribers-link-wrap">
+          <a href="/#participants">
+            Voir les participants sur la page d'accueil →
+          </a>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Pied de page officiel -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <a href="/" class="brand-link" style="color: inherit;">
+          <div class="brand-mark light">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'" />
+          </div>
+        </a>
+        <h4>Festival Culturel et Artistique des Waaba</h4>
+        <p>Ensemble, faisons rayonner la culture Waaba.</p>
+      </div>
+
+      <div class="footer-col">
+        <h5>Navigation</h5>
+        <ul class="footer-links">
+          <li><a href="/">Accueil</a></li>
+          <li><a href="/#donner">Faire un don</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Contact</h5>
+        <p>(+229) 01 66 54 76 09</p>
+        <p>Une initiative portée par Le comité d'organisation du FeCAWa</p>
+      </div>
+    </div>
+
+    <div class="footer-bottom">© 2026 FeCAWa. Tous droits réservés.</div>
+  </footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const txId = urlParams.get('id');
+      const isDemo = urlParams.get('demo') === 'true' || urlParams.get('demo') === '1';
+
+      // Éléments DOM
+      const statusIconWrap = document.getElementById('statusIconWrap');
+      const confirmationTitle = document.getElementById('confirmationTitle');
+      const confirmationSubtitle = document.getElementById('confirmationSubtitle');
+      const amountBanner = document.getElementById('amountBanner');
+      const bannerAmount = document.getElementById('bannerAmount');
+      const blessingBanner = document.getElementById('blessingBanner');
+      const statusAlertBox = document.getElementById('statusAlertBox');
+      const receiptHeaderTitle = document.getElementById('receiptHeaderTitle');
+      const receiptStatusBadge = document.getElementById('receiptStatusBadge');
+      const receiptLoading = document.getElementById('receiptLoading');
+      const loadingMessage = document.getElementById('loadingMessage');
+      const receiptDetails = document.getElementById('receiptDetails');
+      const receiptRef = document.getElementById('receiptRef');
+      const receiptDonor = document.getElementById('receiptDonor');
+      const receiptAmount = document.getElementById('receiptAmount');
+      const receiptDate = document.getElementById('receiptDate');
+      const printBtn = document.getElementById('printBtn');
+      const shareWhatsappBtn = document.getElementById('shareWhatsappBtn');
+      const homeBtn = document.getElementById('homeBtn');
+      const retryBtn = document.getElementById('retryBtn');
+      const donateNowBtn = document.getElementById('donateNowBtn');
+
+      // 1. Mode Démonstration pour aperçu instantané
+      if (isDemo || txId === 'demo') {
+        renderApprovedState({
+          reference: 'FEC-2026-DEMO-777',
+          firstname: 'Biaou',
+          lastname: 'Kora',
+          amount: 25000,
+          date: new Date().toISOString()
+        }, 'DEMO-777');
+        return;
+      }
+
+      // 2. Visite directe de la page sans identifiant de transaction
+      if (!txId) {
+        renderDirectVisitState();
+        return;
+      }
+
+      // 3. Suivi dynamique de la transaction réelle
+      let pollCount = 0;
+      const maxPolls = 10; // ~30 secondes max de contrôle
+      checkPaymentStatus();
+
+      async function checkPaymentStatus() {
+        try {
+          const res = await fetch(`/api/verify-transaction/${encodeURIComponent(txId)}`);
+          const data = await res.json();
+
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || 'Contrôle en cours...');
+          }
+
+          const status = data.status;
+
+          // A. Paiement certifié et effectif (Approuvé)
+          if (status === 'approved') {
+            renderApprovedState(data.donation, txId);
+            return;
+          }
+
+          // B. Paiement refusé ou annulé
+          if (status === 'declined' || status === 'canceled') {
+            renderDeclinedState(status);
+            return;
+          }
+
+          // C. Paiement en attente de débit Mobile Money (Pending)
+          pollCount++;
+          if (pollCount < maxPolls) {
+            renderPendingState(`Validation Mobile Money en cours (contrôle ${pollCount}/${maxPolls})...`);
+            setTimeout(checkPaymentStatus, 3000);
+          } else {
+            renderPendingTimeoutState(data.donation);
+          }
+
+        } catch (err) {
+          console.warn('Vérification transaction:', err);
+          pollCount++;
+          if (pollCount < maxPolls) {
+            renderPendingState(`Contrôle du débit en cours (tentative ${pollCount}/${maxPolls})...`);
+            setTimeout(checkPaymentStatus, 3000);
+          } else {
+            renderPendingTimeoutState(null);
+          }
+        }
+      }
+
+      // ÉTAT 1 : Don Confirmé & Encaissé (Approved)
+      function renderApprovedState(donation, id) {
+        receiptLoading.classList.add('hidden');
+        receiptDetails.classList.remove('hidden');
+        blessingBanner.classList.remove('hidden');
+        statusAlertBox.classList.add('hidden');
+        retryBtn.classList.add('hidden');
+        donateNowBtn.classList.add('hidden');
+        printBtn.classList.remove('hidden');
+        shareWhatsappBtn.classList.remove('hidden');
+        amountBanner.classList.remove('hidden');
+
+        // Icône de validation
+        statusIconWrap.className = 'confirmation-icon-wrap success';
+        statusIconWrap.innerHTML = `
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        `;
+
+        confirmationTitle.textContent = 'Paiement confirmé avec succès !';
+        confirmationSubtitle.textContent = 'Votre généreuse contribution est validée et participe au rayonnement du festival.';
+
+        const d = donation || {};
+        const formattedAmount = d.amount ? new Intl.NumberFormat('fr-FR').format(d.amount) : '0';
+        bannerAmount.textContent = formattedAmount;
+
+        receiptRef.textContent = d.reference || id || 'REC-FECAWA-2026';
+        receiptDonor.textContent = d.firstname ? `${d.firstname} ${d.lastname || ''}`.trim() : 'Généreux Donateur';
+        receiptAmount.textContent = `${formattedAmount} FCFA`;
+        receiptDate.textContent = d.date ? new Date(d.date).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : new Date().toLocaleString('fr-FR');
+        
+        receiptHeaderTitle.textContent = 'Reçu officiel de souscription';
+        receiptStatusBadge.className = 'receipt-badge';
+        receiptStatusBadge.textContent = 'Validé & Encaissé';
+
+        setupWhatsappShare(d.amount || 5000);
+      }
+
+      // ÉTAT 2 : Débit en cours auprès de l'opérateur (Pending)
+      function renderPendingState(msg) {
+        amountBanner.classList.add('hidden');
+        blessingBanner.classList.add('hidden');
+        receiptLoading.classList.remove('hidden');
+        receiptDetails.classList.add('hidden');
+        loadingMessage.textContent = msg;
+
+        retryBtn.classList.add('hidden');
+        printBtn.classList.add('hidden');
+        shareWhatsappBtn.classList.add('hidden');
+        donateNowBtn.classList.add('hidden');
+
+        statusIconWrap.className = 'confirmation-icon-wrap pending';
+        statusIconWrap.innerHTML = `
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        `;
+
+        confirmationTitle.textContent = 'Finalisation de votre don...';
+        confirmationSubtitle.textContent = 'Vérification du débit Mobile Money auprès de votre opérateur.';
+
+        receiptHeaderTitle.textContent = 'Statut de la transaction';
+        receiptStatusBadge.className = 'receipt-badge pending';
+        receiptStatusBadge.textContent = 'En attente de validation';
+
+        statusAlertBox.classList.remove('hidden');
+        statusAlertBox.style.background = '#fff8ee';
+        statusAlertBox.style.border = '1px solid #f2cf87';
+        statusAlertBox.style.color = '#7c4c0b';
+        statusAlertBox.innerHTML = `
+          <strong style="display:flex; align-items:center; gap:8px;">
+            📱 Débit Mobile Money en cours :
+          </strong>
+          <p style="margin-top:6px; font-size:0.92rem;">
+            Veuillez vérifier l'écran de votre téléphone et saisir votre code secret PIN pour autoriser le prélèvement.
+            <br><em style="color:#593504;">Garantie : La cagnotte officielle n'est créditée qu'une fois le débit entièrement validé.</em>
+          </p>
+        `;
+      }
+
+      // ÉTAT 3 : Délai d'attente prolongé
+      function renderPendingTimeoutState(donation) {
+        receiptLoading.classList.add('hidden');
+        receiptDetails.classList.add('hidden');
+        amountBanner.classList.add('hidden');
+        blessingBanner.classList.add('hidden');
+
+        statusAlertBox.classList.remove('hidden');
+        statusAlertBox.style.background = '#fff8ee';
+        statusAlertBox.style.border = '1px solid #f2cf87';
+        statusAlertBox.style.color = '#7c4c0b';
+        statusAlertBox.innerHTML = `
+          <strong>⏳ Traitement opérateur toujours en cours :</strong>
+          <p style="margin-top:6px;">
+            Si vous venez de valider votre code secret PIN sur votre téléphone, la notification opérateur peut prendre quelques instants à nous parvenir. Dès confirmation, votre reçu sera définitivement validé et la cagnotte mise à jour.
+          </p>
+          <div style="margin-top: 14px;">
+            <button onclick="location.reload()" class="btn-secondary-action" style="background:#ffffff; border-color:#e4b967; padding:8px 18px; font-size:0.88rem;">
+              🔄 Rafraîchir le statut
+            </button>
+          </div>
+        `;
+      }
+
+      // ÉTAT 4 : Paiement refusé ou annulé (Declined)
+      function renderDeclinedState(status) {
+        amountBanner.classList.add('hidden');
+        blessingBanner.classList.add('hidden');
+        receiptLoading.classList.add('hidden');
+        receiptDetails.classList.add('hidden');
+        printBtn.classList.add('hidden');
+        shareWhatsappBtn.classList.add('hidden');
+        retryBtn.classList.remove('hidden');
+        donateNowBtn.classList.add('hidden');
+
+        statusIconWrap.className = 'confirmation-icon-wrap error';
+        statusIconWrap.innerHTML = `
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        `;
+
+        confirmationTitle.textContent = 'Paiement non abouti ou annulé';
+        confirmationSubtitle.textContent = 'La transaction n\'a pas pu être validée par l\'opérateur.';
+
+        receiptHeaderTitle.textContent = 'Résultat de la transaction';
+        receiptStatusBadge.className = 'receipt-badge error';
+        receiptStatusBadge.textContent = 'Non débité';
+
+        statusAlertBox.classList.remove('hidden');
+        statusAlertBox.style.background = '#fdf2f2';
+        statusAlertBox.style.border = '1px solid #f5c2c2';
+        statusAlertBox.style.color = '#9b1c1c';
+        statusAlertBox.innerHTML = `
+          <strong>❌ Aucun montant prélevé :</strong>
+          <p style="margin-top:6px; font-size:0.92rem;">
+            L'opération a été annulée ou refusée par le réseau (solde insuffisant, code PIN erroné ou délai dépassé).
+            <br><strong>La cagnotte publique n'a subi aucune modification.</strong> Vous pouvez retenter votre don à tout moment en toute sécurité.
+          </p>
+        `;
+      }
+
+      // ÉTAT 5 : Visite Directe sans Transaction (Aperçu accueillant)
+      function renderDirectVisitState() {
+        receiptLoading.classList.add('hidden');
+        receiptDetails.classList.remove('hidden');
+        blessingBanner.classList.remove('hidden');
+        amountBanner.classList.add('hidden');
+        statusAlertBox.classList.remove('hidden');
+        printBtn.classList.add('hidden');
+        shareWhatsappBtn.classList.add('hidden');
+        retryBtn.classList.add('hidden');
+        donateNowBtn.classList.remove('hidden');
+
+        statusIconWrap.className = 'confirmation-icon-wrap info';
+        statusIconWrap.innerHTML = `
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+        `;
+
+        confirmationTitle.textContent = 'Attestation & Reçu de Don';
+        confirmationSubtitle.textContent = 'Espace officiel de délivrance des attestations et de confirmation des dons pour le Festival FeCAWa 2026.';
+
+        statusAlertBox.style.background = '#fff8ee';
+        statusAlertBox.style.border = '1px solid #f2cf87';
+        statusAlertBox.style.color = '#7c4c0b';
+        statusAlertBox.innerHTML = `
+          <div style="font-weight:700; margin-bottom:4px;">ℹ️ Information :</div>
+          <p style="margin:0; font-size:0.92rem;">
+            Cette page affiche automatiquement le reçu certifié dès qu'un don en ligne est validé.
+            Si vous souhaitez participer à la cagnotte officielle et soutenir la culture Waama, cliquez ci-dessous.
+          </p>
+        `;
+
+        receiptHeaderTitle.textContent = 'Aperçu du modèle d\'attestation';
+        receiptStatusBadge.className = 'receipt-badge info';
+        receiptStatusBadge.textContent = 'Modèle Officiel';
+
+        receiptRef.textContent = 'FEC-2026-EXEMPLE';
+        receiptDonor.textContent = 'Généreux Donateur (Votre Nom)';
+        receiptAmount.textContent = '5 000 FCFA à 500 000 FCFA';
+        receiptDate.textContent = new Date().toLocaleDateString('fr-FR', { dateStyle: 'long' });
+      }
+
+      function setupWhatsappShare(amount) {
+        const text = encodeURIComponent(
+          `🥁 Je viens de soutenir le Festival Culturel et Artistique Waama (FeCAWa 2026 - 3ᵉ édition) qui se tiendra du 19 au 21 novembre 2026 à Toucoutouna !\n\n` +
+          `Participez vous aussi à la sauvegarde et à la promotion de notre patrimoine commun ici : ${window.location.origin}`
+        );
+        shareWhatsappBtn.href = `https://api.whatsapp.com/send?text=${text}`;
+      }
+    });
+  </script>
+</body>
+</html>

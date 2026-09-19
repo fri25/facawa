@@ -1,0 +1,29 @@
+{
+  "name": "fecawa-donation-platform",
+  "version": "1.0.0",
+  "description": "Plateforme de souscription et de don en ligne pour le Festival Culturel et Artistique Waama (FeCAWa 2026)",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "keywords": [
+    "fecawa",
+    "waama",
+    "festival",
+    "benin",
+    "donations",
+    "fedapay",
+    "mobile-money"
+  ],
+  "author": "FeCAWa Organisation",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0"
+  }
+}
