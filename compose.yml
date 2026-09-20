@@ -30,9 +30,35 @@ services:
     networks:
       - proxy
 
+    # Contrôle de santé périodique (Healthcheck - Issue #8)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Plafonds de ressources et descripteurs (Protection OOM & CPU - Issue #8)
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+        reservations:
+          memory: 64M
+          cpus: "0.10"
+
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
     labels:
       # Activer le service dans Traefik
       - "traefik.enable=true"
+
+      # Prise en compte de la santé du conteneur par Traefik
+      - "traefik.docker.usehealthcheck=true"
 
       # Route Host sur le domaine (interpolé depuis .env → DOMAIN)
       - "traefik.http.routers.fecawa.rule=Host(`${DOMAIN}`)"

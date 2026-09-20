@@ -93,10 +93,23 @@ check_network() {
 }
 
 # -----------------------------------------------------------------------------
+# Prérequis : permissions du volume de données SQLite (UID 1000 node)
+# -----------------------------------------------------------------------------
+check_volume() {
+  # Garantit que le volume persistant SQLite est accessible en écriture par l'utilisateur 'node' (UID 1000)
+  for vol in "fecawa_fecawa_data" "fecawa_data"; do
+    if docker volume inspect "$vol" >/dev/null 2>&1; then
+      docker run --rm -v "${vol}:/data" alpine chown -R 1000:1000 /data >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+# -----------------------------------------------------------------------------
 # Déploiement principal
 # -----------------------------------------------------------------------------
 deploy() {
   info "Déploiement de FeCAWa 2026…"
+  check_volume
   docker compose -f "$COMPOSE_FILE" up -d --build
   ok "Conteneurs démarrés"
   echo
@@ -130,6 +143,7 @@ stop() {
 update() {
   info "Mise à jour : pull du code + rebuild + redéploiement…"
   git pull --ff-only 2>/dev/null || warn "git pull ignoré (pas de dépôt ou conflit)"
+  check_volume
   docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate
   ok "Mise à jour appliquée"
   status

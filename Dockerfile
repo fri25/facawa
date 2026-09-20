@@ -16,12 +16,16 @@ COPY server ./server
 COPY public ./public
 
 # Dossier de données pour la base SQLite (monté en volume persistant)
-RUN mkdir -p /app/data
+# Attribution des droits sur /app à l'utilisateur non-root 'node' (UID/GID 1000 standard Alpine)
+RUN mkdir -p /app/data && chown -R node:node /app
 
 # Port écouté par l'application (3000 par défaut, surchargeable par PORT)
 EXPOSE 3000
 
 ENV NODE_ENV=production
 ENV DB_FILE=/app/data/fecawa.db
+
+# Exécution sous l'utilisateur non privilégié 'node' (Durcissement sécurité Issue #8)
+USER node
 
 CMD ["node", "server/server.js"]
