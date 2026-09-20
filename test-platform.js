@@ -260,9 +260,27 @@ async function runTests() {
     const appJsContent = fs.readFileSync(path.join(__dirname, 'public/js/app.js'), 'utf8');
     assert(appJsContent.includes('getFocusableModalElements') && appJsContent.includes('lastFocusedElement') && appJsContent.includes('clearTimeout(focusTimeoutId)'), '[#11] Script app.js intègre le focus trap, la restitution de focus et l\'annulation du timer');
 
-    // Vérification de la disparition de la page souscripteurs (redirection vers accueil)
+    // Test 10.ter (Issue #9) : Suppression du code mort et redirection 301 pérenne
+    const deadHtmlExists = fs.existsSync(path.join(__dirname, 'public/souscripteurs.html'));
+    const deadJsExists = fs.existsSync(path.join(__dirname, 'public/js/subscribers.js'));
+    assert(!deadHtmlExists && !deadJsExists, '[#9] Fichiers morts public/souscripteurs.html et public/js/subscribers.js physiquement supprimés');
+
+    try {
+      await axios.get(`${baseUrl}/souscripteurs`, { maxRedirects: 0 });
+      assert(false, '[#9] GET /souscripteurs doit retourner HTTP 301');
+    } catch (err) {
+      assert(err.response && err.response.status === 301 && err.response.headers.location === '/', '[#9] GET /souscripteurs redirigé en HTTP 301 vers /');
+    }
+
+    try {
+      await axios.get(`${baseUrl}/souscripteurs.html`, { maxRedirects: 0 });
+      assert(false, '[#9] GET /souscripteurs.html doit retourner HTTP 301');
+    } catch (err) {
+      assert(err.response && err.response.status === 301 && err.response.headers.location === '/', '[#9] GET /souscripteurs.html redirigé en HTTP 301 vers /');
+    }
+
     const pageSubscribers = await axios.get(`${baseUrl}/souscripteurs.html`, { maxRedirects: 5 });
-    assert(pageSubscribers.status === 200 && pageSubscribers.data.includes('FeCAWa'), 'La requête vers souscripteurs.html est redirigée vers la page d\'accueil');
+    assert(pageSubscribers.status === 200 && pageSubscribers.data.includes('FeCAWa'), '[#9] La redirection 301 atterrit bien sur la page d\'accueil');
 
     // Facture / Reçu de confirmation
     const pageConfirmation = await axios.get(`${baseUrl}/confirmation.html`);

@@ -40,14 +40,12 @@ fecawa/
 │   └── fecawa.db                    # Base de données SQLite persistante (auto-générée)
 │
 └── public/                          # Frontend moderne (Mobile-First)
-    ├── index.html                   # Page d'accueil : Hero, formulaire de don, FedaPay Checkout
-    ├── souscripteurs.html           # Page publique : Tableau d'honneur des donateurs & recherche
+    ├── index.html                   # Page d'accueil : Hero, participants, formulaire modal de don, Checkout
     ├── confirmation.html            # Page de confirmation, bénédiction et reçu imprimable
     ├── css/
     │   └── style.css                # Styles culturels Waama (terracotta, ocre, responsive)
     ├── js/
-    │   ├── app.js                   # Logique du formulaire et déclenchement Checkout.js
-    │   └── subscribers.js           # Gestion dynamique de la liste des donateurs
+    │   └── app.js                   # Formulaire de souscription, focus-trap modal et feed des participants
     └── assets/
         ├── logo.jpeg                # Logo officiel du festival FeCAWa
         ├── pattern.svg              # Motif géométrique inspiré de l'architecture Tata Somba
