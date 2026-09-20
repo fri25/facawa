@@ -70,7 +70,7 @@ class FedaPayService {
         amount: amount,
         status: 'pending',
         token: simulatedToken,
-        checkoutUrl: `${callbackUrl || '/confirmation.html'}?id=${simulatedId}&demo=true`,
+        checkoutUrl: `${callbackUrl || '/confirmation.html'}?id=${simulatedId}`,
         isSimulated: true
       };
     }
@@ -172,37 +172,114 @@ class FedaPayService {
   }
 
   /**
-   * Vérifie la signature ou l'authenticité d'un webhook FedaPay
+   * Vérifie la signature et l'authenticité d'un webhook FedaPay.
+   * Conforme à la spécification FedaPay (t=<timestamp>,s=<hmac_sha256> avec signedPayload = "$timestamp.$payload").
+   * Gère également en repli les formats hex direct, s=<hex> et sha256=<hex>.
+   *
    * @param {Object} headers En-têtes HTTP de la requête
-   * @param {string|Object} body Corps de la requête
+   * @param {string|Object} body Corps analysé de la requête
+   * @param {string} [rawBody] Corps brut reçu sur le socket HTTP
    */
-  verifyWebhook(headers, body) {
-    // Si aucun secret n'est configuré, on vérifie la présence du format standard FedaPay
+  verifyWebhook(headers, body, rawBody = null) {
+    // Si aucun secret n'est configuré
     if (!this.webhookSecret) {
-      return true;
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[FedaPay Webhook] ❌ Rejet strict: FEDAPAY_WEBHOOK_SECRET non configuré en production.');
+        return false;
+      }
+      // En environnement de test ou développement sans secret, autoriser si aucun header n'est fourni
+      const testSig = headers['x-fedapay-signature'] || headers['X-FEDAPAY-SIGNATURE'];
+      if (!testSig) {
+        return true;
+      }
     }
 
-    const signature = headers['x-fedapay-signature'] || headers['X-FEDAPAY-SIGNATURE'];
-    if (!signature) {
-      console.warn('[FedaPay Webhook] En-tête X-FEDAPAY-SIGNATURE manquant.');
+    const signatureHeader = headers['x-fedapay-signature'] || headers['X-FEDAPAY-SIGNATURE'];
+    if (!signatureHeader || typeof signatureHeader !== 'string') {
+      console.warn('[FedaPay Webhook] En-tête X-FEDAPAY-SIGNATURE manquant ou invalide.');
       return false;
     }
 
     try {
-      const payloadString = typeof body === 'string' ? body : JSON.stringify(body);
-      const hmac = crypto.createHmac('sha256', this.webhookSecret);
-      const digest = hmac.update(payloadString).digest('hex');
+      // 1. Déterminer le payload string brut
+      const payloadString = (typeof rawBody === 'string' && rawBody.length > 0)
+        ? rawBody
+        : (typeof body === 'string' ? body : JSON.stringify(body));
 
-      const provided = Buffer.from(signature, 'hex');
-      const expected = Buffer.from(digest, 'hex');
-      // timingSafeEqual requiert des buffers de même longueur : on vérifie
-      // explicitement pour ne pas lever d'exception sur une signature invalide.
-      if (!provided.length || provided.length !== expected.length) {
+      // 2. Extraire timestamp et signatures candidates (format officiel FedaPay: t=...,s=...)
+      let timestamp = null;
+      const candidates = [];
+      const items = signatureHeader.split(',');
+
+      for (const item of items) {
+        const parts = item.trim().split('=');
+        if (parts.length === 2) {
+          const key = parts[0].trim().toLowerCase();
+          const val = parts[1].trim();
+          if (key === 't') {
+            const parsedT = parseInt(val, 10);
+            if (Number.isFinite(parsedT)) {
+              timestamp = parsedT;
+            }
+          } else if (key === 's' || key === 'v1' || key === 'sha256') {
+            candidates.push(val);
+          }
+        } else if (parts.length === 1 && /^[0-9a-fA-F]{64}$/.test(parts[0].trim())) {
+          candidates.push(parts[0].trim());
+        }
+      }
+
+      if (candidates.length === 0) {
+        console.warn('[FedaPay Webhook] ❌ Aucune signature candidate trouvée dans le header.');
         return false;
       }
-      return crypto.timingSafeEqual(provided, expected);
+
+      // 3. Vérification de la tolérance temporelle (anti-rejeu) si un timestamp est présent (300 s)
+      if (timestamp !== null) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const toleranceSec = 300;
+        if (Math.abs(nowSec - timestamp) > toleranceSec) {
+          console.warn(`[FedaPay Webhook] ❌ Rejet anti-rejeu : Timestamp hors tolérance (${timestamp} vs now: ${nowSec}).`);
+          return false;
+        }
+      }
+
+      // Comparaison en temps constant et sécurisée (évite ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH_MISMATCH)
+      const timingSafeMatches = (expectedHex, candidateHex) => {
+        if (!expectedHex || !candidateHex) return false;
+        const hashExpected = crypto.createHash('sha256').update(expectedHex.toLowerCase()).digest();
+        const hashCandidate = crypto.createHash('sha256').update(candidateHex.toLowerCase()).digest();
+        return crypto.timingSafeEqual(hashExpected, hashCandidate);
+      };
+
+      // 4. Calculer l'empreinte HMAC attendue
+      // Cas nominal FedaPay : signedPayload = `${timestamp}.${payloadString}`
+      if (timestamp !== null) {
+        const signedPayload = `${timestamp}.${payloadString}`;
+        const hmac = crypto.createHmac('sha256', this.webhookSecret);
+        const expectedSignature = hmac.update(signedPayload).digest('hex');
+
+        for (const candidate of candidates) {
+          if (timingSafeMatches(expectedSignature, candidate)) {
+            return true;
+          }
+        }
+      }
+
+      // Repli : HMAC direct sur le corps brut (si webhook sans préfixe timestamp)
+      const directHmac = crypto.createHmac('sha256', this.webhookSecret);
+      const expectedDirect = directHmac.update(payloadString).digest('hex');
+
+      for (const candidate of candidates) {
+        if (timingSafeMatches(expectedDirect, candidate)) {
+          return true;
+        }
+      }
+
+      console.warn('[FedaPay Webhook] ❌ Signature invalide : aucune correspondance cryptographique.');
+      return false;
     } catch (err) {
-      console.error('[FedaPay Webhook] Erreur calcul signature:', err.message);
+      console.error('[FedaPay Webhook] Erreur lors de la vérification de la signature:', err.message);
       return false;
     }
   }

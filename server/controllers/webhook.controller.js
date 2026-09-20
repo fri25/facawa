@@ -16,7 +16,7 @@ const WebhookController = {
       console.log('[Webhook] Notification FedaPay reçue.');
 
       // 1. Vérification de la signature du webhook
-      const isValid = fedapayService.verifyWebhook(req.headers, req.body);
+      const isValid = fedapayService.verifyWebhook(req.headers, req.body, req.rawBody);
       if (!isValid) {
         console.warn('[Webhook] ❌ Rejet : Signature ou origine non authentifiée.');
         return res.status(401).json({ error: 'Signature invalide.' });
@@ -31,6 +31,13 @@ const WebhookController = {
       // 2. Traitement des transactions approuvées
       if (eventName === 'transaction.approved' || entity?.status === 'approved') {
         const transactionId = entity.id;
+
+        // Idempotence : si la transaction est déjà approuvée en base locale, acquitter sans recalcul
+        const existingDonation = DonationRepository.getByTransactionId(transactionId);
+        if (existingDonation && existingDonation.status === 'approved') {
+          console.log(`[Webhook] ℹ️ Transaction #${transactionId} déjà validée en base (idempotence). Réponse 200 OK.`);
+          return res.status(200).json({ received: true, status: 'already_processed' });
+        }
 
         let isConfirmedEffective = false;
         let verifiedTx = null;

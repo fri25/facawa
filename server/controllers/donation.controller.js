@@ -24,6 +24,20 @@ function privateReceiptView(donation) {
   };
 }
 
+// Cache mémoire anti-hammering (limite la fréquence des interrogations externes FedaPay par transaction)
+const recentExternalChecks = new Map();
+const CHECK_COOLDOWN_MS = 3000; // 3 secondes de délai minimal entre deux appels sortants FedaPay pour le même ID
+
+function cleanupRecentChecks() {
+  const now = Date.now();
+  for (const [key, timestamp] of recentExternalChecks.entries()) {
+    if (now - timestamp > 60000) {
+      recentExternalChecks.delete(key);
+    }
+  }
+}
+setInterval(cleanupRecentChecks, 60000).unref();
+
 const DonationController = {
   /**
    * Crée une transaction de don et prépare le paiement FedaPay
@@ -101,23 +115,44 @@ const DonationController = {
   async verifyTransaction(req, res) {
     try {
       const { id } = req.params;
-      if (!id) {
-        return res.status(400).json({ success: false, message: 'ID de transaction requis.' });
+      if (!id || id === 'demo' || id === 'null' || id === 'undefined') {
+        return res.status(400).json({ success: false, message: 'ID de transaction valide requis.' });
       }
 
-      // Vérifier d'abord en local
+      // 1. Vérifier d'abord en base de données locale
       let donation = DonationRepository.getByTransactionId(id);
 
-      // Si déjà approuvé en base locale (via webhook)
-      if (donation && donation.status === 'approved') {
+      // Si le don est déjà dans un statut terminal (approuvé, refusé, annulé), renvoyer immédiatement
+      if (donation && ['approved', 'declined', 'canceled'].includes(donation.status)) {
         return res.json({
           success: true,
-          status: 'approved',
+          status: donation.status,
           donation: privateReceiptView(donation)
         });
       }
 
-      // Si non encore approuvé, interroger FedaPay directement
+      // Anti-énumération : si la transaction n'existe pas en base locale et n'est pas simulée
+      if (!donation && !String(id).startsWith('sim_')) {
+        return res.status(404).json({
+          success: false,
+          message: 'Transaction introuvable.'
+        });
+      }
+
+      // 2. Anti-hammering : si une vérification externe a eu lieu il y a moins de 3 secondes pour cet ID
+      const lastCheck = recentExternalChecks.get(id);
+      const now = Date.now();
+      if (lastCheck && (now - lastCheck) < CHECK_COOLDOWN_MS) {
+        return res.json({
+          success: true,
+          status: donation?.status || 'pending',
+          donation: privateReceiptView(donation)
+        });
+      }
+
+      recentExternalChecks.set(id, now);
+
+      // 3. Interroger FedaPay
       try {
         const fedaTx = await fedapayService.getTransaction(id);
         const status = fedaTx.status; // approved, pending, declined, etc.

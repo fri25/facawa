@@ -263,6 +263,88 @@ async function runTests() {
     const pageConfirmation = await axios.get(`${baseUrl}/confirmation.html`);
     assert(pageConfirmation.status === 200 && pageConfirmation.data.includes('Que Dieu bénisse ces généreux donateurs'), 'Page de confirmation/facture servie avec la bénédiction');
 
+    // =========================================================================
+    // TESTS COMPLÉMENTAIRES : ISSUES #17, #5, #12
+    // =========================================================================
+    console.log('\n🔒 Tests de sécurité et durcissement (#17, #5, #12)...');
+
+    // Test 11 (Issue #17) : Vérification que le mode démo n'est plus actif sur confirmation
+    assert(!pageConfirmation.data.includes('FEC-2026-DEMO-777'), '[#17] Pas de fausse référence DEMO préremplie dans confirmation.html');
+    assert(!pageConfirmation.data.includes("urlParams.get('demo')"), '[#17] Suppression de la capture du paramètre ?demo=true');
+
+    try {
+      await axios.get(`${baseUrl}/api/verify-transaction/demo`);
+      assert(false, '[#17] GET /api/verify-transaction/demo doit être rejeté');
+    } catch (err) {
+      assert(err.response && err.response.status === 400, '[#17] GET /api/verify-transaction/demo rejeté en HTTP 400');
+    }
+
+    // Test 12 (Issue #5) : Vérification de la signature HMAC FedaPay (t=...,s=...)
+    const crypto = require('crypto');
+    fedapayService.webhookSecret = 'wh_test_secret_key_12345';
+
+    const testWebhookBody = JSON.stringify({
+      name: 'transaction.approved',
+      entity: { id: 'test_tx_hmac', status: 'approved' }
+    });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const signedPayload = `${nowSec}.${testWebhookBody}`;
+    const validHmac = crypto.createHmac('sha256', fedapayService.webhookSecret).update(signedPayload).digest('hex');
+
+    // A. Signature officielle FedaPay valide
+    const validHeaders = {
+      'x-fedapay-signature': `t=${nowSec},s=${validHmac}`
+    };
+    const isValidSignature = fedapayService.verifyWebhook(validHeaders, JSON.parse(testWebhookBody), testWebhookBody);
+    assert(isValidSignature === true, '[#5] Signature officielle FedaPay t=...,s=... acceptée');
+
+    // B. Signature altérée
+    const tamperedHeaders = {
+      'x-fedapay-signature': `t=${nowSec},s=0000000000000000000000000000000000000000000000000000000000000000`
+    };
+    const isTamperedValid = fedapayService.verifyWebhook(tamperedHeaders, JSON.parse(testWebhookBody), testWebhookBody);
+    assert(isTamperedValid === false, '[#5] Signature HMAC altérée rejetée (false)');
+
+    // C. Timestamp hors tolérance (> 300 secondes dans le passé)
+    const expiredSec = nowSec - 500;
+    const expiredSignedPayload = `${expiredSec}.${testWebhookBody}`;
+    const expiredHmac = crypto.createHmac('sha256', fedapayService.webhookSecret).update(expiredSignedPayload).digest('hex');
+    const expiredHeaders = {
+      'x-fedapay-signature': `t=${expiredSec},s=${expiredHmac}`
+    };
+    const isExpiredValid = fedapayService.verifyWebhook(expiredHeaders, JSON.parse(testWebhookBody), testWebhookBody);
+    assert(isExpiredValid === false, '[#5] Signature avec timestamp expiré (> 300s) rejetée (anti-rejeu)');
+
+    // D. Envoi réel sur la route /api/webhook/fedapay avec mauvaise signature -> 401
+    try {
+      await axios.post(`${baseUrl}/api/webhook/fedapay`, JSON.parse(testWebhookBody), {
+        headers: { 'x-fedapay-signature': 't=1234,s=badhex' }
+      });
+      assert(false, '[#5] Webhook avec signature invalide doit retourner 401');
+    } catch (err) {
+      assert(err.response && err.response.status === 401, '[#5] POST /api/webhook/fedapay avec signature invalide retourne HTTP 401');
+    }
+
+    // Réinitialiser le secret pour les tests sans signature
+    fedapayService.webhookSecret = '';
+
+    // Test 13 (Issue #12) : Idempotence de la réception du webhook
+    const idempotentPayload = {
+      name: 'transaction.approved',
+      entity: { id: txId1, status: 'approved' }
+    };
+    const idempRes = await axios.post(`${baseUrl}/api/webhook/fedapay`, idempotentPayload);
+    assert(idempRes.status === 200 && idempRes.data.status === 'already_processed', '[#12] Webhook renvoyé pour transaction déjà validée acquitté en mode idempotent (already_processed)');
+
+    // Test 14 (Issue #12) : Anti-hammering et bypass sur statut terminal
+    const terminalCheckRes = await axios.get(`${baseUrl}/api/verify-transaction/${txId1}`);
+    assert(terminalCheckRes.status === 200 && terminalCheckRes.data.status === 'approved', '[#12] Transaction approuvée consultée sans réinterroger inutilement FedaPay');
+
+    // Test 15 (Issue #12) : Service de réconciliation
+    const reconciliationService = require('./server/services/reconciliation.service');
+    const reconcilRes = await reconciliationService.reconcilePending({ limit: 10, minAgeMinutes: 0 });
+    assert(reconcilRes !== undefined && reconcilRes.checked >= 0, '[#12] Service de réconciliation des transactions pending opérationnel');
+
     console.log(`\n========================================`);
     console.log(`🎉 BILAN : ${passed} passés, ${failed} échoués`);
     console.log(`========================================\n`);

@@ -186,8 +186,8 @@
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
       const urlParams = new URLSearchParams(window.location.search);
-      const txId = urlParams.get('id');
-      const isDemo = urlParams.get('demo') === 'true' || urlParams.get('demo') === '1';
+      const rawTxId = urlParams.get('id');
+      const txId = (rawTxId && rawTxId.trim() !== '' && rawTxId !== 'demo') ? rawTxId.trim() : null;
 
       // Éléments DOM
       const statusIconWrap = document.getElementById('statusIconWrap');
@@ -212,27 +212,16 @@
       const retryBtn = document.getElementById('retryBtn');
       const donateNowBtn = document.getElementById('donateNowBtn');
 
-      // 1. Mode Démonstration pour aperçu instantané
-      if (isDemo || txId === 'demo') {
-        renderApprovedState({
-          reference: 'FEC-2026-DEMO-777',
-          firstname: 'Biaou',
-          lastname: 'Kora',
-          amount: 25000,
-          date: new Date().toISOString()
-        }, 'DEMO-777');
-        return;
-      }
-
-      // 2. Visite directe de la page sans identifiant de transaction
+      // 1. Visite directe de la page sans identifiant de transaction vérifiable
       if (!txId) {
         renderDirectVisitState();
         return;
       }
 
-      // 3. Suivi dynamique de la transaction réelle
+      // 2. Suivi dynamique de la transaction réelle avec backoff progressif
       let pollCount = 0;
-      const maxPolls = 10; // ~30 secondes max de contrôle
+      const pollDelays = [2000, 3000, 4000, 6000, 8000, 10000]; // 6 vérifications échelonnées (~33 s max)
+      const maxPolls = pollDelays.length;
       checkPaymentStatus();
 
       async function checkPaymentStatus() {
@@ -259,20 +248,22 @@
           }
 
           // C. Paiement en attente de débit Mobile Money (Pending)
-          pollCount++;
           if (pollCount < maxPolls) {
+            const delay = pollDelays[pollCount];
+            pollCount++;
             renderPendingState(`Validation Mobile Money en cours (contrôle ${pollCount}/${maxPolls})...`);
-            setTimeout(checkPaymentStatus, 3000);
+            setTimeout(checkPaymentStatus, delay);
           } else {
             renderPendingTimeoutState(data.donation);
           }
 
         } catch (err) {
           console.warn('Vérification transaction:', err);
-          pollCount++;
           if (pollCount < maxPolls) {
+            const delay = pollDelays[pollCount];
+            pollCount++;
             renderPendingState(`Contrôle du débit en cours (tentative ${pollCount}/${maxPolls})...`);
-            setTimeout(checkPaymentStatus, 3000);
+            setTimeout(checkPaymentStatus, delay);
           } else {
             renderPendingTimeoutState(null);
           }

@@ -215,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.isSimulated) {
           showToast('Mode simulation activé : redirection vers le reçu...', 'success');
           setTimeout(() => {
-            window.location.replace(`/confirmation?id=${data.transactionId}&demo=true`);
+            window.location.replace(`/confirmation?id=${encodeURIComponent(data.transactionId)}`);
           }, 800);
           return;
         }

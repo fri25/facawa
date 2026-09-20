@@ -263,6 +263,26 @@ const DonationRepository = {
       recentDonors24h: Number(recent.recentCount),
       currency: 'XOF'
     };
+  },
+
+  /**
+   * Récupère les transactions en attente récentes pour réconciliation
+   * @param {Object} options
+   * @param {number} options.limit Nombre max d'enregistrements (défaut 50)
+   * @param {number} options.minAgeMinutes Âge minimal en minutes (défaut 2 min)
+   * @param {number} options.maxAgeHours Âge maximal en heures (défaut 24 h)
+   */
+  getPendingDonations({ limit = 50, minAgeMinutes = 2, maxAgeHours = 24 } = {}) {
+    const stmt = db.prepare(`
+      SELECT * FROM donations 
+      WHERE status = 'pending'
+        AND transaction_id IS NOT NULL
+        AND created_at <= datetime('now', '-' || ? || ' minutes')
+        AND created_at >= datetime('now', '-' || ? || ' hours')
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+    return stmt.all(minAgeMinutes, maxAgeHours, limit);
   }
 };
 

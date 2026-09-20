@@ -104,8 +104,13 @@ function originGuard(req, res, next) {
 }
 app.use(originGuard);
 
-// Parseurs JSON et URL-encoded
-app.use(express.json({ limit: '1mb' }));
+// Parseurs JSON et URL-encoded (avec conservation du corps brut pour vérification HMAC)
+app.use(express.json({
+  limit: '1mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf ? buf.toString('utf8') : '';
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Limiteur de débit pour l'API de création de dons (protection anti-spam)
