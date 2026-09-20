@@ -18,6 +18,12 @@ const apiRoutes = require('./routes/api');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// IMPORTANT : derrière Traefik (reverse proxy), toutes les requêtes arrivent
+// avec l'IP du proxy. Sans 'trust proxy', req.ip = IP de Traefik pour tout le
+// monde → le rate limiter devient global (50 req/15min partagées par tous).
+// '1' = faire confiance au premier proxy (Traefik) de la chaîne X-Forwarded-For.
+app.set('trust proxy', 1);
+
 // Configuration de la sécurité avec Helmet (adapté pour le widget FedaPay Checkout.js)
 app.use(
   helmet({
@@ -129,6 +135,7 @@ app.listen(PORT, () => {
   console.log('====================================================');
   console.log(`🎉 FeCAWa 2026 - Plateforme de Souscription Active !`);
   console.log(`📍 URL locale : http://localhost:${PORT}`);
+  console.log(`📍 URL de production : https://${process.env.DOMAIN}`);
   console.log(`💳 FedaPay Mode : ${process.env.FEDAPAY_ENV || 'sandbox'}`);
   console.log('====================================================');
 });

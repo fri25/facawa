@@ -17,3 +17,6 @@ data/*.db-shm
 # OS files
 .DS_Store
 Thumbs.db
+
+# Scripts de diagnostic (scratch)
+scratch/

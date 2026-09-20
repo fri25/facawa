@@ -121,8 +121,19 @@ class FedaPayService {
         isSimulated: false
       };
     } catch (error) {
-      const errorMsg = error.response?.data?.message || error.response?.data?.errors || error.message;
-      console.error('[FedaPay] Erreur lors de la création de la transaction:', errorMsg);
+      // Logging complet pour diagnostiquer la vraie cause (status + corps + détails)
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const errorMsg = data?.message || data?.errors || error.message;
+      console.error('[FedaPay] Erreur lors de la création de la transaction:');
+      console.error(`  Status HTTP : ${status || 'N/A'}`);
+      console.error(`  Message     : ${errorMsg}`);
+      if (data && (data.errors || data.error)) {
+        console.error(`  Détails     : ${JSON.stringify(data.errors || data.error)}`);
+      }
+      if (error.code === 'ECONNABORTED') {
+        console.error('  Cause       : Timeout (15s) — API FedaPay injoignable ou trop lente.');
+      }
       throw new Error(`Erreur FedaPay: ${JSON.stringify(errorMsg)}`);
     }
   }
