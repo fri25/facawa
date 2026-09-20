@@ -345,6 +345,53 @@ async function runTests() {
     const reconcilRes = await reconciliationService.reconcilePending({ limit: 10, minAgeMinutes: 0 });
     assert(reconcilRes !== undefined && reconcilRes.checked >= 0, '[#12] Service de réconciliation des transactions pending opérationnel');
 
+    // =========================================================================
+    // TESTS COMPLÉMENTAIRES : ISSUES #6, #13, #7
+    // =========================================================================
+    console.log('\n🛡️ Tests de rate limiting et d\'étanchéité IP (#6, #13, #7)...');
+
+    // Test 16 (Issue #7) : Présence de rate limiting sur /api/stats, /api/subscribers et /api/verify-transaction
+    const statsRateRes = await axios.get(`${baseUrl}/api/stats`);
+    assert(statsRateRes.headers['ratelimit-limit'] !== undefined, '[#7] En-tête RateLimit-Limit présent sur GET /api/stats');
+
+    const subsRateRes = await axios.get(`${baseUrl}/api/subscribers`);
+    assert(subsRateRes.headers['ratelimit-limit'] !== undefined, '[#7] En-tête RateLimit-Limit présent sur GET /api/subscribers');
+
+    const verifyRateRes = await axios.get(`${baseUrl}/api/verify-transaction/${txId1}`);
+    assert(verifyRateRes.headers['ratelimit-limit'] !== undefined, '[#7] En-tête RateLimit-Limit présent sur GET /api/verify-transaction/:id');
+
+    // Test 17 (Issue #13) : Anti-spoofing X-Forwarded-For (ne crée pas de nouveau bucket sur connexion directe)
+    // En envoyant une fausse IP en X-Forwarded-For, le serveur utilise l'IP réelle du socket
+    const fakeIpRes1 = await axios.get(`${baseUrl}/api/stats`, {
+      headers: { 'x-forwarded-for': '203.0.113.111' }
+    });
+    const remaining1 = parseInt(fakeIpRes1.headers['ratelimit-remaining'], 10);
+
+    const fakeIpRes2 = await axios.get(`${baseUrl}/api/stats`, {
+      headers: { 'x-forwarded-for': '203.0.113.222' }
+    });
+    const remaining2 = parseInt(fakeIpRes2.headers['ratelimit-remaining'], 10);
+
+    // Si le spoofing réussissait, remaining2 serait égal à la limite max (nouveau bucket).
+    // Grâce au correctif anti-spoofing, les deux requêtes partagent le même bucket local et remaining décrémente.
+    assert(remaining2 < remaining1, '[#13] Anti-spoofing X-Forwarded-For : les requêtes partagent le même bucket socket et décrémentent le quota');
+
+    // Test 18 (Issue #6) : Prise en compte de CF-Connecting-IP sous Cloudflare
+    // En simulant une connexion proxy avec CF-Connecting-IP valide, le quota utilise cette IP
+    process.env.TRUST_LOOPBACK_PROXY = 'true';
+    const cfRes1 = await axios.get(`${baseUrl}/api/stats`, {
+      headers: { 'cf-connecting-ip': '198.51.100.77' }
+    });
+    const cfLimit = parseInt(cfRes1.headers['ratelimit-limit'], 10);
+
+    const cfRes2 = await axios.get(`${baseUrl}/api/stats`, {
+      headers: { 'cf-connecting-ip': '198.51.100.88' }
+    });
+    const cfRemaining2 = parseInt(cfRes2.headers['ratelimit-remaining'], 10);
+    // Deux IPs clientes réelles distinctes doivent avoir chacune leur propre quota intact (-1)
+    assert(cfRemaining2 === cfLimit - 1, '[#6] Header CF-Connecting-IP alloue un quota distinct par visiteur derrière le proxy Cloudflare');
+    delete process.env.TRUST_LOOPBACK_PROXY;
+
     console.log(`\n========================================`);
     console.log(`🎉 BILAN : ${passed} passés, ${failed} échoués`);
     console.log(`========================================\n`);
