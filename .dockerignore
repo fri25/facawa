@@ -1,0 +1,21 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environnement (injecté par docker-compose, pas bakes dans l'image)
+.env
+.env.local
+.env.*.local
+
+# Base de données (montée en volume persistant)
+data/
+
+# Dossiers locaux / scratch
+scratch/
+.kilo/
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db

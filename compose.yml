@@ -1,0 +1,60 @@
+# FeCAWa 2026 — Conteneur Node.js/Express derrière Traefik (réseau externe "proxy")
+#
+# Toutes les variables proviennent de .env (env_file) :
+#   - DOMAIN            → domaine public (ex: don.fecawa-waama.org) utilisé par Traefik
+#   - PORT              → port écoute interne (défaut 3000)
+#   - FEDAPAY_*         → clés API FedaPay + secret webhook
+#   - APP_URL, NODE_ENV → configuration applicative
+#
+# Aucune modification du compose n'est nécessaire pour changer de domaine
+# ou de clé : il suffit de modifier .env et de relancer `docker compose up -d`.
+
+services:
+  fecawa:
+    build: .
+    container_name: fecawa
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # Forcer le mode production dans le conteneur (la variable .env peut éventuellement
+      # dire 'development' ; on veut toujours du prod derrière Traefik).
+      NODE_ENV: production
+
+    volumes:
+      # Persistance de la base SQLite (fichier fecawa.db + fichiers WAL/SHM)
+      - fecawa_data:/app/data
+
+    networks:
+      - proxy
+
+    labels:
+      # Activer le service dans Traefik
+      - "traefik.enable=true"
+
+      # Route Host sur le domaine (interpolé depuis .env → DOMAIN)
+      - "traefik.http.routers.fecawa.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.fecawa.entrypoints=websecure"
+      - "traefik.http.routers.fecawa.tls.certresolver=letsencrypt"
+
+      # Service / load-balancer vers le port 3000 (PORT interne)
+      - "traefik.http.services.fecawa.loadbalancer.server.port=3000"
+
+      # Redirection HTTP → HTTPS (optionnel, si tu n'as pas de redirect séparé)
+      - "traefik.http.routers.fecawa-http.entrypoints=web"
+      - "traefik.http.routers.fecawa-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.fecawa-http.service=fecawa"
+      - "traefik.http.routers.fecawa-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+
+volumes:
+  # Volume persistant pour la base SQLite (survit aux redémarrages / rebuilds)
+  fecawa_data:
+
+networks:
+  # Réseau externe déjà existant sur le VPS (Traefik)
+  proxy:
+    external: true

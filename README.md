@@ -17,6 +17,11 @@ fecawa/
 ├── .gitignore                       # Fichiers ignorés par git
 ├── README.md                        # Documentation complète et guide de déploiement
 │
+├── Dockerfile                       # Image Node.js 22 Alpine (déploiement Docker)
+├── compose.yml                      # Composition Docker + Traefik (réseau externe "proxy")
+├── deploy.sh                        # Script d'automatisation du déploiement
+├── .dockerignore                    # Exclusion des fichiers sensibles du build Docker
+│
 ├── server/                          # Backend Node.js + Express
 │   ├── server.js                    # Point d'entrée, sécurité Helmet/CSP, CORS, rate-limiting
 │   ├── config/
@@ -181,6 +186,57 @@ L'architecture actuelle s'appuie sur le repository modulaire [`server/config/dat
 ---
 
 ## 🌐 Guide de Déploiement
+
+### Option 0 : Déploiement Docker + Traefik (recommandé)
+
+Le projet est conteneurisé (`Dockerfile` + `compose.yml`) et conçu pour être déployé derrière un **Traefik** déjà présent sur votre VPS, via le réseau externe `proxy`.
+
+**Fichiers de déploiement :**
+- `Dockerfile` — image Node.js 22 Alpine (Express + SQLite)
+- `compose.yml` — composition standard moderne (réseau `proxy`, volume persistant, labels Traefik)
+- `deploy.sh` — script d'automatisation complet (déploiement, logs, restart, update, check)
+- `.dockerignore` — exclusion des fichiers sensibles du contexte de build
+
+**1. Prérequis sur le VPS :**
+- Docker + plugin `docker compose` (v2)
+- Un réseau Docker externe nommé `proxy` (celui de votre stack Traefik) :
+  ```bash
+  docker network create proxy   # si pas déjà créé par Traefik
+  ```
+
+**2. Configuration (tout passe par `.env`, jamais par le compose) :**
+```env
+DOMAIN=don.fecawa-waama.org        # domaine public routé par Traefik
+PORT=3000                          # port interne (défaut)
+FEDAPAY_ENV=sandbox                # ou live
+FEDAPAY_PUBLIC_KEY=pk_sandbox_...
+FEDAPAY_SECRET_KEY=sk_sandbox_...
+FEDAPAY_WEBHOOK_SECRET=whsec_...
+APP_URL=https://don.fecawa-waama.org
+```
+
+**3. Déploiement en une commande :**
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+**Commandes du script :**
+```bash
+./deploy.sh            # déploie (build + up -d) puis suit les logs
+./deploy.sh status     # état des conteneurs
+./deploy.sh logs       # logs du service fecawa
+./deploy.sh restart    # redémarre le service
+./deploy.sh stop       # arrête (données SQLite conservées)
+./deploy.sh update     # git pull + rebuild + redéploiement
+./deploy.sh check      # vérifie docker, .env, réseau proxy
+```
+
+**4. DNS :** votre domaine doit pointer vers l'IP du VPS (record **A**). Traefik obtient automatiquement le certificat HTTPS (LetsEncrypt).
+
+**5. Webhook FedaPay :** configurez `https://votre-domaine.org/api/webhook/fedapay` dans le dashboard FedaPay (voir section Webhook ci-dessous).
+
+> **Changer de domaine ou de clés ?** Modifiez uniquement `.env`, puis relancez `./deploy.sh` — aucune modification du `compose.yml` n'est nécessaire.
 
 ### Option 1 : Déploiement sur Render.com (Simple & Gratuit / Économique)
 1. Poussez votre code sur GitHub / GitLab.
