@@ -6,7 +6,6 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const express = require('express');
-const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -62,6 +61,12 @@ app.use(
           "https://checkout.fedapay.com",
           "https://*.fedapay.com"
         ],
+        formAction: [
+          "'self'",
+          "https://checkout.fedapay.com",
+          "https://sandbox-checkout.fedapay.com",
+          "https://*.fedapay.com"
+        ],
         frameSrc: [
           "'self'",
           "https://checkout.fedapay.com",
@@ -74,8 +79,30 @@ app.use(
   })
 );
 
-// Configuration CORS
-app.use(cors());
+// Configuration CORS : l'API est destinée au site lui-même (même origine) et au
+// webhook FedaPay. Les requêtes cross-site sont rejetées (anti-abus / anti-CSRF) :
+// on ne se contente pas de refuser les en-têtes, on répond 403 en présence d'une
+// origine étrangère pour empêcher tout site tiers de piloter le paiement.
+const SITE_ORIGIN = (() => {
+  try {
+    return new URL(process.env.APP_URL || 'http://localhost').origin;
+  } catch {
+    return '';
+  }
+})();
+const allowedOrigins = new Set([SITE_ORIGIN, 'https://facawa.hashcode.cloud'].filter(Boolean));
+
+function originGuard(req, res, next) {
+  const origin = req.headers.origin;
+  if (origin) {
+    const isFedaPay = origin.endsWith('.fedapay.com');
+    if (!allowedOrigins.has(origin) && !isFedaPay) {
+      return res.status(403).json({ success: false, message: 'Origine non autorisée.' });
+    }
+  }
+  next();
+}
+app.use(originGuard);
 
 // Parseurs JSON et URL-encoded
 app.use(express.json({ limit: '1mb' }));

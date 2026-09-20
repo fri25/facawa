@@ -5,6 +5,25 @@
 const { DonationRepository } = require('../config/database');
 const fedapayService = require('../services/fedapay.service');
 
+/**
+ * Vue "reçu" d'une donation en respectant les choix de confidentialité.
+ * Évite toute fuite PII via l'énumération des identifiants de transaction.
+ */
+function privateReceiptView(donation) {
+  if (!donation) return null;
+  const isPublic = Boolean(donation.is_public);
+  const hideAmount = Boolean(donation.hide_amount);
+  return {
+    reference: donation.reference,
+    firstname: isPublic ? donation.firstname : 'Donateur bienveillant',
+    lastname: isPublic ? donation.lastname : '',
+    amount: hideAmount ? null : donation.amount,
+    currency: donation.currency,
+    date: donation.created_at || donation.date,
+    message: donation.message
+  };
+}
+
 const DonationController = {
   /**
    * Crée une transaction de don et prépare le paiement FedaPay
@@ -12,7 +31,11 @@ const DonationController = {
   async createTransaction(req, res) {
     try {
       const data = req.cleanData;
-      const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      let appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      appUrl = appUrl.trim().replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(appUrl)) {
+        appUrl = `https://${appUrl}`;
+      }
       const callbackUrl = `${appUrl}/confirmation.html`;
 
       // 1. Appel API FedaPay pour créer la transaction et obtenir le token
@@ -90,15 +113,7 @@ const DonationController = {
         return res.json({
           success: true,
           status: 'approved',
-          donation: {
-            reference: donation.reference,
-            firstname: donation.firstname,
-            lastname: donation.lastname,
-            amount: donation.amount,
-            currency: donation.currency,
-            date: donation.created_at,
-            message: donation.message
-          }
+          donation: privateReceiptView(donation)
         });
       }
 
@@ -121,30 +136,14 @@ const DonationController = {
         return res.json({
           success: true,
           status: status || donation?.status || 'pending',
-          donation: donation ? {
-            reference: donation.reference,
-            firstname: donation.firstname,
-            lastname: donation.lastname,
-            amount: donation.amount,
-            currency: donation.currency,
-            date: donation.created_at,
-            message: donation.message
-          } : null
+          donation: privateReceiptView(donation)
         });
       } catch (fedaErr) {
         // En cas d'erreur de contact FedaPay, retourner l'état local actuel
         return res.json({
           success: true,
           status: donation?.status || 'pending',
-          donation: donation ? {
-            reference: donation.reference,
-            firstname: donation.firstname,
-            lastname: donation.lastname,
-            amount: donation.amount,
-            currency: donation.currency,
-            date: donation.created_at,
-            message: donation.message
-          } : null
+          donation: privateReceiptView(donation)
         });
       }
     } catch (error) {

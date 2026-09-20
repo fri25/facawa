@@ -83,6 +83,9 @@ class FedaPayService {
       if (rawPhone.startsWith('229')) {
         rawPhone = rawPhone.substring(3);
       }
+      if (rawPhone.startsWith('01') && rawPhone.length > 9) {
+        rawPhone = rawPhone.substring(2);
+      }
 
       const payload = {
         description: description || 'Souscription FeCAWa 2026',
@@ -189,7 +192,15 @@ class FedaPayService {
       const payloadString = typeof body === 'string' ? body : JSON.stringify(body);
       const hmac = crypto.createHmac('sha256', this.webhookSecret);
       const digest = hmac.update(payloadString).digest('hex');
-      return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+
+      const provided = Buffer.from(signature, 'hex');
+      const expected = Buffer.from(digest, 'hex');
+      // timingSafeEqual requiert des buffers de même longueur : on vérifie
+      // explicitement pour ne pas lever d'exception sur une signature invalide.
+      if (!provided.length || provided.length !== expected.length) {
+        return false;
+      }
+      return crypto.timingSafeEqual(provided, expected);
     } catch (err) {
       console.error('[FedaPay Webhook] Erreur calcul signature:', err.message);
       return false;

@@ -26,6 +26,8 @@ async function runTests() {
   process.env.FEDAPAY_SECRET_KEY = 'sk_sandbox_sample_key';
   process.env.FEDAPAY_PUBLIC_KEY = 'pk_sandbox_sample_key';
   process.env.FEDAPAY_ENV = 'sandbox';
+  // Désactive la vérification de signature des webhooks simulés
+  process.env.FEDAPAY_WEBHOOK_SECRET = '';
   
   const server = require('./server/server.js');
   const baseUrl = 'http://localhost:3001';

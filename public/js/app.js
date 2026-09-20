@@ -246,6 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         console.log('[FedaPay] Ouverture du widget Checkout.js pour la transaction #', params.transactionId);
 
+        // Ne pas empiler le modal du site sous l'overlay FedaPay
+        closeDonationModal();
+
         const widget = FedaPay.init({
           public_key: params.publicKey,
           transaction: {
@@ -262,7 +265,15 @@ document.addEventListener('DOMContentLoaded', () => {
           },
           onComplete: function(response) {
             console.log('[FedaPay] Paiement terminé callback:', response);
-            window.location.replace(`/confirmation?id=${params.transactionId}`);
+
+            if (response && response.reason === FedaPay.CHECKOUT_COMPLETED) {
+              window.location.replace(`/confirmation?id=${params.transactionId}`);
+              return;
+            }
+
+            console.log('[FedaPay] Fenêtre fermée sans paiement confirmé.');
+            showToast('Paiement non confirmé. Vous pouvez réessayer.', 'info');
+            setLoading(false);
           },
           onError: function(err) {
             console.error('[FedaPay] Erreur paiement:', err);
@@ -425,10 +436,13 @@ function formatDate(dateStr) {
 }
 
 function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  if (text === null || text === undefined) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function showToast(message, type = 'info') {
