@@ -254,6 +254,11 @@ async function runTests() {
     assert(pageIndex.status === 200 && pageIndex.data.includes('FeCAWa'), 'Page d\'accueil index.html servie avec succès');
     assert(pageIndex.data.includes('id="donationModal"'), 'Panneau modal de souscription présent sur la page d\'accueil');
     assert(pageIndex.data.includes('id="donationForm"'), 'Formulaire de souscription logé dans le panneau modal');
+    assert(pageIndex.data.includes('aria-describedby="modalSubtitle"') && pageIndex.data.includes('id="modalSubtitle"'), '[#11] Attributs ARIA complets sur la modale (aria-modal, aria-labelledby, aria-describedby)');
+
+    // Test 10.bis (Issue #11) : Vérification du focus trap et restitution du focus dans app.js
+    const appJsContent = fs.readFileSync(path.join(__dirname, 'public/js/app.js'), 'utf8');
+    assert(appJsContent.includes('getFocusableModalElements') && appJsContent.includes('lastFocusedElement') && appJsContent.includes('clearTimeout(focusTimeoutId)'), '[#11] Script app.js intègre le focus trap, la restitution de focus et l\'annulation du timer');
 
     // Vérification de la disparition de la page souscripteurs (redirection vers accueil)
     const pageSubscribers = await axios.get(`${baseUrl}/souscripteurs.html`, { maxRedirects: 5 });

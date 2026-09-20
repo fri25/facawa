@@ -79,36 +79,103 @@ document.addEventListener('DOMContentLoaded', () => {
     syncActiveButtons(amountInput.value.trim());
   });
 
-  // 3. Gestion du Panneau Modal de Souscription
+  // 3. Gestion du Panneau Modal de Souscription (Accessibilité & Focus Trap - Issue #11)
   const donationModal = document.getElementById('donationModal');
   const modalBackdrop = document.getElementById('modalBackdrop');
   const closeModalBtn = document.getElementById('closeModalBtn');
+  let lastFocusedElement = null;
+  let focusTimeoutId = null;
 
-  function openDonationModal() {
+  function getFocusableModalElements() {
+    if (!donationModal) return [];
+    const selector = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(donationModal.querySelectorAll(selector)).filter(el => {
+      // Filtrer les éléments invisibles ou situés dans un conteneur masqué
+      return !el.closest('.hidden') && el.offsetParent !== null;
+    });
+  }
+
+  function openDonationModal(triggerEl = null) {
     if (donationModal) {
+      lastFocusedElement = triggerEl || document.activeElement;
       donationModal.classList.remove('hidden');
       document.body.classList.add('modal-open');
-      setTimeout(() => {
+
+      if (focusTimeoutId) {
+        clearTimeout(focusTimeoutId);
+      }
+
+      focusTimeoutId = setTimeout(() => {
+        if (donationModal.classList.contains('hidden')) return;
         const firstnameInput = document.getElementById('firstname');
         if (firstnameInput && !firstnameInput.value) {
           firstnameInput.focus();
+        } else {
+          const focusables = getFocusableModalElements();
+          if (focusables.length > 0) focusables[0].focus();
         }
-      }, 150);
+      }, 50);
     }
   }
 
   function closeDonationModal() {
     if (donationModal) {
+      if (focusTimeoutId) {
+        clearTimeout(focusTimeoutId);
+        focusTimeoutId = null;
+      }
       donationModal.classList.add('hidden');
       document.body.classList.remove('modal-open');
+
+      // Restauration du focus sur le déclencheur (accessibilité lecteur d'écran / clavier)
+      if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+        try {
+          lastFocusedElement.focus();
+        } catch (e) {
+          // ignoré si l'élément a disparu du DOM
+        }
+      }
     }
   }
 
-  // Écouteurs d'ouverture du modal
+  // Focus trap : intercepter Tab / Shift+Tab pour maintenir le focus à l'intérieur de la modale
+  document.addEventListener('keydown', (e) => {
+    if (!donationModal || donationModal.classList.contains('hidden')) return;
+
+    if (e.key === 'Escape') {
+      closeDonationModal();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const focusables = getFocusableModalElements();
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+
+      const firstFocusable = focusables[0];
+      const lastFocusable = focusables[focusables.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstFocusable || !donationModal.contains(document.activeElement)) {
+          e.preventDefault();
+          lastFocusable.focus();
+        }
+      } else {
+        if (document.activeElement === lastFocusable || !donationModal.contains(document.activeElement)) {
+          e.preventDefault();
+          firstFocusable.focus();
+        }
+      }
+    }
+  });
+
+  // Écouteurs d'ouverture du modal avec mémorisation du déclencheur
   document.querySelectorAll('.open-modal-btn, .btn-header-donate, .btn-hero-donate, a[href="#donner"], a[href="/#donner"]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      openDonationModal();
+      openDonationModal(btn);
     });
   });
 
@@ -119,11 +186,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (modalBackdrop) {
     modalBackdrop.addEventListener('click', closeDonationModal);
   }
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && donationModal && !donationModal.classList.contains('hidden')) {
-      closeDonationModal();
-    }
-  });
 
   // Ouverture automatique si le lien pointe vers #donner
   if (window.location.hash === '#donner') {
