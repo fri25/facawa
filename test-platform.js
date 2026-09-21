@@ -28,6 +28,9 @@ async function runTests() {
   process.env.FEDAPAY_ENV = 'sandbox';
   // Désactive la vérification de signature des webhooks simulés
   process.env.FEDAPAY_WEBHOOK_SECRET = '';
+  // Force NODE_ENV hors production : sinon dotenv reprend NODE_ENV=production du .env
+  // et le webhook non signé des tests est rejeté (régressions #5/#12 impossibles à tester).
+  process.env.NODE_ENV = 'development';
   
   const server = require('./server/server.js');
   const baseUrl = 'http://localhost:3001';
@@ -171,6 +174,15 @@ async function runTests() {
     assert(statsAfterUnconfirmed.data.stats.totalAmount === 0, 'Aucun montant n’est ajouté sans confirmation effective de FedaPay');
 
     fedapayService.getTransaction = originalGetTransaction;
+
+    // Test 5quater: Normalisation de la réponse /token (plate live ou enveloppe v1/token)
+    const unwrapToken = fedapayService.unwrapTokenData;
+    assert(typeof unwrapToken === 'function', 'Helper de normalisation du token exposé par le service');
+    const flatToken = unwrapToken({ token: 'tok_def', url: 'https://process.fedapay.com/flat' });
+    assert(flatToken.token === 'tok_def' && flatToken.url === 'https://process.fedapay.com/flat', 'Réponse plate (live) normalisée correctement');
+    const wrappedToken = unwrapToken({ 'v1/token': { token: 'tok_abc', url: 'https://process.fedapay.com/v1' } });
+    assert(wrappedToken.token === 'tok_abc' && wrappedToken.url === 'https://process.fedapay.com/v1', 'Enveloppe "v1/token" normalisée (défense)');
+    assert(unwrapToken({}).token === undefined, 'Réponse vide ne pond pas de faux token');
 
     // Test 6: Simulation Webhook FedaPay (transaction.approved) pour txId1
     const webhookPayload1 = {

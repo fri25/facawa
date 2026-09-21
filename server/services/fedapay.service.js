@@ -7,6 +7,16 @@
 const axios = require('axios');
 const crypto = require('crypto');
 
+/**
+ * Normalise la réponse de POST /transactions/:id/token.
+ * Vérifié sur l'API live : la réponse est plate { token, url }.
+ * Par défense, on gère aussi l'enveloppe "v1/token" d'autres modèles d'API.
+ */
+function unwrapTokenData(data) {
+  const wrap = data || {};
+  return wrap['v1/token'] || wrap;
+}
+
 class FedaPayService {
   constructor() {
     this.secretKey = process.env.FEDAPAY_SECRET_KEY || '';
@@ -111,11 +121,9 @@ class FedaPayService {
       const transaction = res.data['v1/transaction'] || res.data.transaction || res.data;
 
       // Génération du token Checkout pour le widget frontend.
-      // L'API FedaPay enveloppe ses objets sous la clé "v1/<modele>" ("v1/transaction"
-      // à la création, "v1/token" ici). Sans désenveloppement, checkoutUrl et le token
-      // sont undefined et le fallback anti-figeage du frontend ne peut pas rediriger.
-      const tokenWrap = tokenRes.data || {};
-      const tokenData = tokenWrap['v1/token'] || tokenWrap;
+      // Réponse live (vérifiée) : { token, url } en plat. unwrapTokenData gère en
+      // plus l'enveloppe "v1/token" par défense (fonction pure, testée).
+      const tokenData = unwrapTokenData(tokenRes.data);
 
       return {
         id: transaction.id,
@@ -289,3 +297,4 @@ class FedaPayService {
 }
 
 module.exports = new FedaPayService();
+module.exports.unwrapTokenData = unwrapTokenData;

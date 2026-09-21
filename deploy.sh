@@ -105,13 +105,31 @@ check_volume() {
 }
 
 # -----------------------------------------------------------------------------
+# État git : refuse de déployer un arbre non commité (évite de build un code
+# qui n'existe pas dans le dépôt, image non traçable vers un commit)
+# -----------------------------------------------------------------------------
+git_dirty_check() {
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    warn "Pas de dépôt git local : impossible de vérifier l'état du code (déploiement non traçable)."
+    return 0
+  fi
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    err "Arbre git non propre : déploiement refusé (le conteneur serait bâti depuis un code non commité)."
+    err "Commite ou stash d'abord :  git add -A && git commit -m '<description>'"
+    exit 1
+  fi
+  ok "Arbre git propre — HEAD = $(git rev-parse --short HEAD) ($(git log -1 --format='%s' | cut -c1-60))"
+}
+
+# -----------------------------------------------------------------------------
 # Déploiement principal
 # -----------------------------------------------------------------------------
 deploy() {
   info "Déploiement de FeCAWa 2026…"
+  git_dirty_check
   check_volume
   docker compose -f "$COMPOSE_FILE" up -d --build
-  ok "Conteneurs démarrés"
+  ok "Conteneurs démarrés ($(docker inspect -f '{{.Image}}' "$SERVICE_NAME" 2>/dev/null | cut -c8-19))"
   echo
   status
   echo
@@ -142,10 +160,11 @@ stop() {
 
 update() {
   info "Mise à jour : pull du code + rebuild + redéploiement…"
+  git_dirty_check
   git pull --ff-only 2>/dev/null || warn "git pull ignoré (pas de dépôt ou conflit)"
   check_volume
   docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate
-  ok "Mise à jour appliquée"
+  ok "Mise à jour appliquée (HEAD = $(git rev-parse --short HEAD))"
   status
 }
 
