@@ -114,7 +114,8 @@ app.use(
           "'unsafe-eval'",
           "https://cdn.fedapay.com",
           "https://checkout.fedapay.com",
-          "https://*.fedapay.com"
+          "https://*.fedapay.com",
+          "https://static.cloudflareinsights.com"
         ],
         styleSrc: [
           "'self'",
@@ -138,7 +139,9 @@ app.use(
           "https://api.fedapay.com",
           "https://sandbox-api.fedapay.com",
           "https://checkout.fedapay.com",
-          "https://*.fedapay.com"
+          "https://*.fedapay.com",
+          "https://static.cloudflareinsights.com",
+          "https://cloudflareinsights.com"
         ],
         formAction: [
           "'self'",

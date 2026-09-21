@@ -184,6 +184,43 @@ async function runTests() {
     assert(wrappedToken.token === 'tok_abc' && wrappedToken.url === 'https://process.fedapay.com/v1', 'Enveloppe "v1/token" normalisée (défense)');
     assert(unwrapToken({}).token === undefined, 'Réponse vide ne pond pas de faux token');
 
+    // Test 5quinquies: CHEMIN RÉEL de createTransaction (création + /token) réseau simulé.
+    // Régression #PR-1 : un refactor avait supprimé l'appel POST /token (ReferenceError au
+    // runtime, invisible en simulation et au node --check). Ce test l'exerce sans réseau.
+    const savedHttp = fedapayService.getHttpClient;
+    const savedSampleFlag = fedapayService.isSampleKey;
+    let tokenEndpointCalled = false;
+    fedapayService.isSampleKey = false;
+    fedapayService.getHttpClient = () => ({
+      post: async (url, body) => {
+        if (url === '/transactions') {
+          return { data: { 'v1/transaction': { id: 42, reference: 'FEC-REAL', amount: 5000, status: 'pending' } } };
+        }
+        if (url === '/transactions/42/token') {
+          tokenEndpointCalled = true;
+          return { data: { token: 'tok_live_abc', url: 'https://process.fedapay.com/ok' } };
+        }
+        throw new Error('URL inattendue: ' + url);
+      }
+    });
+    try {
+      const realPath = await fedapayService.createTransaction({
+        amount: 5000,
+        description: 'Test chemin réel',
+        customer: { firstname: 'A', lastname: 'B', phone: '61000000', email: 'chemin-reel@test.dev' },
+        callbackUrl: 'https://x/confirmation.html'
+      });
+      assert(tokenEndpointCalled, "L'endpoint /transactions/:id/token est appelé sur le chemin réel");
+      assert(realPath.token === 'tok_live_abc' && realPath.checkoutUrl === 'https://process.fedapay.com/ok', 'Chemin réel: token et checkoutUrl extraits correctement');
+      const sim = realPath.isSimulated === false;
+      assert(sim, 'Chemin réel non marqué comme simulé');
+    } catch (e) {
+      assert(false, 'Chemin réel createTransaction sans erreur (' + e.message + ')');
+    } finally {
+      fedapayService.getHttpClient = savedHttp;
+      fedapayService.isSampleKey = savedSampleFlag;
+    }
+
     // Test 6: Simulation Webhook FedaPay (transaction.approved) pour txId1
     const webhookPayload1 = {
       name: 'transaction.approved',

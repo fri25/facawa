@@ -123,6 +123,7 @@ class FedaPayService {
       // Génération du token Checkout pour le widget frontend.
       // Réponse live (vérifiée) : { token, url } en plat. unwrapTokenData gère en
       // plus l'enveloppe "v1/token" par défense (fonction pure, testée).
+      const tokenRes = await client.post(`/transactions/${transaction.id}/token`);
       const tokenData = unwrapTokenData(tokenRes.data);
 
       return {
