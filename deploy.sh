@@ -96,11 +96,18 @@ check_network() {
 # Prérequis : permissions du volume de données SQLite (UID 1000 node)
 # -----------------------------------------------------------------------------
 check_volume() {
-  # Garantit que le volume persistant SQLite est accessible en écriture par l'utilisateur 'node' (UID 1000)
-  for vol in "fecawa_fecawa_data" "fecawa_data"; do
-    if docker volume inspect "$vol" >/dev/null 2>&1; then
-      docker run --rm -v "${vol}:/data" alpine chown -R 1000:1000 /data >/dev/null 2>&1 || true
-    fi
+  # Garantit que le volume persistant SQLite est accessible en écriture par l'utilisateur
+  # 'node' (UID 1000). Le volume peut être nommé "facawa_fecawa_data", "fecawa_fecawa_data"…
+  # selon le nom de projet compose réutilisé à sa création. On chowne tous les volumes
+  # dont le nom se termine par "_fecawa_data".
+  local vols
+  vols=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E '_fecawa_data$' || true)
+  if [ -z "$vols" ]; then
+    return 0
+  fi
+  for vol in $vols; do
+    docker run --rm -v "${vol}:/data" alpine chown -R 1000:1000 /data >/dev/null 2>&1 || true
+    ok "Permissions UID 1000 assurées sur le volume '$vol'"
   done
 }
 
