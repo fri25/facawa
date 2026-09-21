@@ -110,9 +110,12 @@ class FedaPayService {
       const res = await client.post('/transactions', payload);
       const transaction = res.data['v1/transaction'] || res.data.transaction || res.data;
 
-      // Génération du token Checkout pour le widget frontend
-      const tokenRes = await client.post(`/transactions/${transaction.id}/token`);
-      const tokenData = tokenRes.data || {};
+      // Génération du token Checkout pour le widget frontend.
+      // L'API FedaPay enveloppe ses objets sous la clé "v1/<modele>" ("v1/transaction"
+      // à la création, "v1/token" ici). Sans désenveloppement, checkoutUrl et le token
+      // sont undefined et le fallback anti-figeage du frontend ne peut pas rediriger.
+      const tokenWrap = tokenRes.data || {};
+      const tokenData = tokenWrap['v1/token'] || tokenWrap;
 
       return {
         id: transaction.id,
