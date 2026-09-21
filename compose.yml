@@ -57,9 +57,6 @@ services:
       # Activer le service dans Traefik
       - "traefik.enable=true"
 
-      # Prise en compte de la santé du conteneur par Traefik
-      - "traefik.docker.usehealthcheck=true"
-
       # Route Host sur le domaine (interpolé depuis .env → DOMAIN)
       - "traefik.http.routers.fecawa.rule=Host(`${DOMAIN}`)"
       - "traefik.http.routers.fecawa.entrypoints=websecure"
