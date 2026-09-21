@@ -304,57 +304,96 @@ document.addEventListener('DOMContentLoaded', () => {
    * Ouvre le widget officiel Checkout.js de FedaPay
    */
   function triggerFedaPayCheckout(params) {
-    if (typeof FedaPay !== 'undefined') {
-      try {
-        console.log('[FedaPay] Ouverture du widget Checkout.js pour la transaction #', params.transactionId);
-
-        // Ne pas empiler le modal du site sous l'overlay FedaPay
-        closeDonationModal();
-
-        const widget = FedaPay.init({
-          public_key: params.publicKey,
-          transaction: {
-            id: params.transactionId
-          },
-          customer: {
-            firstname: params.customer.firstname,
-            lastname: params.customer.lastname,
-            email: params.customer.email,
-            phone_number: {
-              number: params.customer.phone.replace(/\D/g, ''),
-              country: 'BJ'
-            }
-          },
-          onComplete: function(response) {
-            console.log('[FedaPay] Paiement terminé callback:', response);
-
-            if (response && response.reason === FedaPay.CHECKOUT_COMPLETED) {
-              window.location.replace(`/confirmation?id=${params.transactionId}`);
-              return;
-            }
-
-            console.log('[FedaPay] Fenêtre fermée sans paiement confirmé.');
-            showToast('Paiement non confirmé. Vous pouvez réessayer.', 'info');
-            setLoading(false);
-          },
-          onError: function(err) {
-            console.error('[FedaPay] Erreur paiement:', err);
-            showToast('Le paiement a été interrompu ou refusé.', 'error');
-            setLoading(false);
-          },
-          onClose: function() {
-            console.log('[FedaPay] Fenêtre de paiement fermée.');
-            setLoading(false);
-          }
-        });
-
-        widget.open();
-      } catch (widgetError) {
-        console.warn('[FedaPay] Erreur init widget, fallback URL:', widgetError);
-        fallbackRedirect(params.checkoutUrl, params.transactionId);
-      }
-    } else {
+    if (typeof FedaPay === 'undefined') {
       console.warn('[FedaPay] Checkout.js non disponible, redirection vers page de paiement.');
+      fallbackRedirect(params.checkoutUrl, params.transactionId);
+      return;
+    }
+
+    try {
+      console.log('[FedaPay] Ouverture du widget Checkout.js pour la transaction #', params.transactionId);
+
+      // Ne pas empiler le modal du site sous l'overlay FedaPay
+      closeDonationModal();
+
+      // Garde-fou anti-figeage : si le widget ne répond ni par onComplete, onClose
+      // ni onError sous 45 s (spinner bloqué, domaine non autorisé...), on bascule
+      // vers la page de paiement sécurisée FedaPay pour que le donateur ne reste jamais coincé.
+      let widgetClosed = false;
+      const widgetGuard = setTimeout(() => {
+        if (widgetClosed) return;
+        console.warn('[FedaPay] Le widget ne répond plus, bascule vers la page de paiement.');
+        fallbackRedirect(params.checkoutUrl, params.transactionId);
+      }, 45000);
+
+      const finishWidget = () => {
+        widgetClosed = true;
+        clearTimeout(widgetGuard);
+      };
+
+      // Environnement déduit de la clé publique pour éviter tout blocage
+      // dû à une incohérence sandbox/live entre clé et transaction.
+      const environment = params.publicKey && params.publicKey.startsWith('pk_live_')
+        ? 'live'
+        : 'sandbox';
+
+      const widget = FedaPay.init({
+        public_key: params.publicKey,
+        environment,
+        transaction: {
+          id: params.transactionId
+        },
+        customer: {
+          firstname: params.customer.firstname,
+          lastname: params.customer.lastname,
+          email: params.customer.email,
+          phone_number: {
+            number: params.customer.phone.replace(/\D/g, ''),
+            country: 'BJ'
+          }
+        },
+        onComplete: function(reasonOrResponse, transactionObj) {
+          finishWidget();
+
+          // Checkout.js peut passer (reason, transaction) ou un objet { reason, transaction }.
+          const response = (reasonOrResponse && typeof reasonOrResponse === 'object')
+            ? reasonOrResponse
+            : { reason: reasonOrResponse, transaction: transactionObj };
+
+          console.log('[FedaPay] Paiement terminé callback:', response);
+
+          const completedForSure = response.reason === FedaPay.CHECKOUT_COMPLETED;
+          const confirmedTxId = (response.transaction && response.transaction.id) || params.transactionId;
+
+          if (completedForSure || (response.transaction && response.transaction.status === 'approved')) {
+            window.location.replace(`/confirmation?id=${encodeURIComponent(confirmedTxId)}`);
+            return;
+          }
+
+          console.log('[FedaPay] Fenêtre fermée sans paiement confirmé.');
+          showToast('Paiement non confirmé. Vous pouvez réessayer.', 'info');
+          setLoading(false);
+        },
+        onError: function(err) {
+          finishWidget();
+          console.error('[FedaPay] Erreur paiement:', err);
+          showToast('Le paiement a été interrompu ou refusé.', 'error');
+          setLoading(false);
+        },
+        onClose: function() {
+          finishWidget();
+          console.log('[FedaPay] Fenêtre de paiement fermée.');
+          setLoading(false);
+        }
+      });
+
+      if (!widget || typeof widget.open !== 'function') {
+        throw new Error('Widget Checkout.js invalide.');
+      }
+
+      widget.open();
+    } catch (widgetError) {
+      console.warn('[FedaPay] Erreur init widget, fallback URL:', widgetError);
       fallbackRedirect(params.checkoutUrl, params.transactionId);
     }
   }
