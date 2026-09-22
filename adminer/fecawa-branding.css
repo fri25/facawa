@@ -1,0 +1,17 @@
+/* =============================================================================
+   Branding FeCAWa — appliqué par-dessus le thème Adminer.
+   Remplace le logo "Adminer" de la barre de menu par le logo FeCAWa.
+   ============================================================================= */
+
+#h1 {
+	display: inline-block;
+	height: 30px;
+	padding-left: 40px;
+	color: transparent;
+	background: url("fecawa-logo.jpeg") no-repeat left center;
+	background-size: auto 30px;
+}
+
+#h1 #logo {
+	display: none;
+}

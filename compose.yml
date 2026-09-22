@@ -73,6 +73,45 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
+  # Adminer — interface Web (SQLite) sur fecawadb.hashcode.cloud
+  adminer:
+    build:
+      context: .
+      dockerfile: adminer/Dockerfile
+    image: fecawa-adminer:latest
+    container_name: fecawa-adminer
+    restart: unless-stopped
+
+    depends_on:
+      - fecawa
+
+    environment:
+      # Active les plugins : injection CSS de marque + auto-remplissage de la connexion SQLite
+      ADMINER_PLUGINS: fecawa-branding fecawa-sqlite-auto
+
+    volumes:
+      # Même volume que l'application : le fichier SQLite est visible dans /app/data
+      - fecawa_data:/app/data
+
+    networks:
+      - proxy
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fecawa-adminer.rule=Host(`${ADMINER_DOMAIN}`)"
+      - "traefik.http.routers.fecawa-adminer.entrypoints=websecure"
+      - "traefik.http.routers.fecawa-adminer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.fecawa-adminer.loadbalancer.server.port=8080"
+      # Protection par mot de passe (basic-auth Traefik) — hash APR1 de la paire admin:tkSNKqNsKS6o3CZ4
+      # (les '$' du hash doivent être doublés '$$' ici ; changer le mot de passe → générer
+      #  un hash avec `openssl passwd -apr1` puis doubler les '$')
+      - "traefik.http.routers.fecawa-adminer.middlewares=fecawa-adminer-auth"
+      - "traefik.http.middlewares.fecawa-adminer-auth.basicauth.users=admin:$$apr1$$f22217$$Awz/P.aqN3mRp3h.XJaDE0"
+      - "traefik.http.routers.fecawa-adminer-http.entrypoints=web"
+      - "traefik.http.routers.fecawa-adminer-http.rule=Host(`${ADMINER_DOMAIN}`)"
+      - "traefik.http.routers.fecawa-adminer-http.service=fecawa-adminer"
+      - "traefik.http.routers.fecawa-adminer-http.middlewares=redirect-to-https"
+
 volumes:
   # Volume persistant pour la base SQLite (survit aux redémarrages / rebuilds)
   fecawa_data:
