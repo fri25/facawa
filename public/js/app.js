@@ -447,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const stats = data.stats || {};
       const totalAmount = stats.totalAmount || 0;
       const totalDonors = stats.totalDonors || 0;
-      const goal = 1000000;
+      const goal = 17000000;
       const percent = Math.min(100, (totalAmount / goal) * 100).toFixed(1);
 
       if (metricTotal) metricTotal.textContent = `${formatCFA(totalAmount)} FCFA`;
