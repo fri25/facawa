@@ -5,6 +5,7 @@
  */
 
 const axios = require('axios');
+const { normalizeDonorPhone } = require('./phone.service');
 const crypto = require('crypto');
 
 /**
@@ -88,13 +89,23 @@ class FedaPayService {
     try {
       const client = this.getHttpClient();
 
-      // Normaliser le numéro de téléphone béninois (si commence par 01, +229, etc.)
-      let rawPhone = customer.phone ? customer.phone.replace(/\D/g, '') : '';
-      if (rawPhone.startsWith('229')) {
-        rawPhone = rawPhone.substring(3);
-      }
-      if (rawPhone.startsWith('01') && rawPhone.length > 9) {
-        rawPhone = rawPhone.substring(2);
+      // Normalisation du numéro : FedaPay exige un numéro NATIONAL et un pays
+      // cohérent. L'ancien code envoyait le numéro brut avec `country: 'BJ'`
+      // en dur, ce qui rejetait toute saisie portant un autre indicatif pays
+      // (ex. « +225 07 … » pour un donateur ivoirien) avec un message
+      // illisible côté donateur. Voir services/phone.service.js.
+      const phone = normalizeDonorPhone(customer.phone);
+      if (!phone.ok) {
+        // Erreur volontairement AVANT tout appel réseau : le donateur reçoit un
+        // message actionnable, et l'appel échoué ne consomme pas le quota
+        // sortant FedaPay.
+        const error = new Error(
+          `Numéro de téléphone non exploitable pour le paiement (${phone.reason}). ` +
+          'Merci de le ressaisir au format international, ex. +229 01 97 51 23 45.'
+        );
+        error.statusCode = 400;
+        error.isUserError = true;
+        throw error;
       }
 
       const payload = {
@@ -109,21 +120,24 @@ class FedaPayService {
           lastname: customer.lastname,
           email: customer.email || `${customer.phone.replace(/\D/g, '') || 'donateur'}@fecawa-waama.org`,
           phone_number: {
-            number: rawPhone,
-            country: 'BJ'
+            number: phone.national,
+            country: phone.country
           }
         },
         custom_metadata: customMetadata || {}
       };
 
       console.log('[FedaPay] Création de la transaction...', { amount: payload.amount, customer: payload.customer.firstname });
-      const res = await client.post('/transactions', payload);
+      const res = await this.callFeda(() => client.post('/transactions', payload), 'create-transaction');
       const transaction = res.data['v1/transaction'] || res.data.transaction || res.data;
 
       // Génération du token Checkout pour le widget frontend.
       // Réponse live (vérifiée) : { token, url } en plat. unwrapTokenData gère en
       // plus l'enveloppe "v1/token" par défense (fonction pure, testée).
-      const tokenRes = await client.post(`/transactions/${transaction.id}/token`);
+      const tokenRes = await this.callFeda(
+        () => client.post(`/transactions/${transaction.id}/token`),
+        'create-token'
+      );
       const tokenData = unwrapTokenData(tokenRes.data);
 
       return {

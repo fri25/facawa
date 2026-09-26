@@ -2,6 +2,8 @@
  * Middlewares de validation et de nettoyage des entrées pour l'API FeCAWa.
  */
 
+const { normalizeDonorPhone } = require('../services/phone.service');
+
 function sanitizeString(str) {
   if (typeof str !== 'string') return '';
   return str
@@ -43,6 +45,16 @@ function validateDonationInput(req, res, next) {
   const digitsOnly = cleanPhone.replace(/\D/g, '');
   if (!digitsOnly || digitsOnly.length < 8) {
     errors.push('Un numéro de téléphone valide est obligatoire pour le paiement Mobile Money.');
+  } else {
+    // On va plus loin qu'un simple compte de chiffres : FedaPay rejette un
+    // numéro national mal formé, et le donateur n'aurait droit qu'à un
+    // « Impossible d'initialiser le paiement » sans savoir quoi corriger.
+    // On remonte donc la cause ici, avant tout appel à l'API de paiement.
+    const parsed = normalizeDonorPhone(cleanPhone);
+    if (!parsed.ok) errors.push(
+        `Numéro de téléphone invalide (${parsed.reason === 'length' ? 'longueur inattendue' : 'format non reconnu'}). ` +
+        'Format attendu : indicatif pays puis numéro, ex. +229 01 97 51 23 45.'
+      );
   }
 
   // Validation Montant (minimum 100 FCFA)
