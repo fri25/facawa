@@ -41,6 +41,16 @@ class FedaPayService {
     // Détecter si les clés sont des placeholders pour proposer un mode simulation si besoin
     this.isSampleKey = !this.secretKey || this.secretKey.includes('sample_key') || this.secretKey.includes('votre_cle');
 
+    // Budget d'appels sortants (fenêtre glissante d'1 h). Plafond par défaut
+    // très supérieur à l'usage normal d'un festival (une vérification par
+    // donateur + quelques contrôles), mais assez bas pour qu'un abus ne
+    // puisse pas vider le quota du compte FedaPay. 0 = désactivé.
+    const quotaMax = parseInt(process.env.FEDAPAY_OUTGOING_QUOTA_PER_HOUR || '600', 10);
+    this.outgoingQuota = {
+      max: Number.isFinite(quotaMax) && quotaMax >= 0 ? quotaMax : 600,
+      hits: []
+    };
+
     if (this.isSampleKey) {
       console.warn('[FedaPay] ⚠️ Aucune clé FedaPay valide configurée dans .env (Mode démonstration/simulation activé).');
     } else {
@@ -61,6 +71,44 @@ class FedaPayService {
       },
       timeout: 15000
     });
+  }
+
+  /**
+   * Budget d'appels sortants.
+   *
+   * Le quota du compte FedaPay est fini : sans plafond, n'importe quel client
+   * peut le consommer à l'excès en enchaînant des vérifications de
+   * transaction, ce qui bloque les encaissements légitimes. Le budget est
+   * global au processus : il ne dépend d'aucune clé de rate-limit, donc il
+   * résiste à l'usurpation d'IP. Fenêtre glissante d'une heure.
+   */
+  consumeOutgoingQuota(cost = 1) {
+    if (!this.outgoingQuota || this.outgoingQuota.max <= 0) return true; // désactivé
+    const now = Date.now();
+    // Purge des entrées hors fenêtre
+    while (this.outgoingQuota.hits.length > 0 && now - this.outgoingQuota.hits[0] > 3600000) {
+      this.outgoingQuota.hits.shift();
+    }
+    if (this.outgoingQuota.hits.length + cost > this.outgoingQuota.max) {
+      return false;
+    }
+    for (let i = 0; i < cost; i++) this.outgoingQuota.hits.push(now);
+    return true;
+  }
+
+  /**
+   * Exécute un appel API FedaPay en respectant le budget d'appels sortants.
+   */
+  async callFeda(fn, label) {
+    if (!this.consumeOutgoingQuota(1)) {
+      const err = new Error(
+        `Budget d'appels FedaPay épuisé (${this.outgoingQuota.max}/h). Opération "${label}" refusée.`
+      );
+      err.code = 'FEDA_QUOTA_EXCEEDED';
+      console.error(`[FedaPay] 🛑 Budget d'appels sortants épuisé : "${label}" refusée.`);
+      throw err;
+    }
+    return fn();
   }
 
   /**
@@ -188,7 +236,10 @@ class FedaPayService {
 
     try {
       const client = this.getHttpClient();
-      const res = await client.get(`/transactions/${transactionId}`);
+      const res = await this.callFeda(
+        () => client.get(`/transactions/${transactionId}`),
+        `get-transaction:${transactionId}`
+      );
       const transaction = res.data['v1/transaction'] || res.data.transaction || res.data;
       return transaction;
     } catch (error) {
