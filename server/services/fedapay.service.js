@@ -250,13 +250,27 @@ class FedaPayService {
 
   /**
    * Vérifie la signature et l'authenticité d'un webhook FedaPay.
-   * Conforme à la spécification FedaPay (t=<timestamp>,s=<hmac_sha256> avec signedPayload = "$timestamp.$payload").
-   * Gère également en repli les formats hex direct, s=<hex> et sha256=<hex>.
+   *
+   * Format officiel unique : en-tête `X-FEDAPAY-SIGNATURE` = `t=<timestamp>,s=<hex>`
+   * où s = HMAC-SHA256(secret, "<timestamp>.<corps brut>").
+   *
+   * La documentation FedaPay est explicite : « FedaPay inclut un horodatage
+   * (timestamp) dans l'en-tête X-FEDAPAY-SIGNATURE pour empêcher les attaques
+   * par nouvelle tentative » et « si l'horodatage est trop ancien, votre
+   * application peut rejeter le webhook ». Le timestamp est donc TOUJOURS
+   * présent, et chaque réessai régénère signature + horodatage.
+   *
+   * Un ancien repli acceptait un HMAC direct sur le corps, SANS timestamp,
+   * donc SANS aucune protection anti-rejeu : un webhook intercepté restait
+   * rejouable indéfiniment. Ce repli a été SUPPRIMÉ (2026-09-26) — il était
+   * mort en pratique et affaiblissait la sécurité. Toute signature acceptée
+   * doit désormais porter un timestamp frais.
    *
    * @param {Object} headers En-têtes HTTP de la requête
-   * @param {string|Object} body Corps analysé de la requête
+   * @param {Object} body Corps analysé de la requête
    * @param {string} [rawBody] Corps brut reçu sur le socket HTTP
    */
+
   verifyWebhook(headers, body, rawBody = null) {
     // Si aucun secret n'est configuré
     if (!this.webhookSecret) {
@@ -283,7 +297,7 @@ class FedaPayService {
         ? rawBody
         : (typeof body === 'string' ? body : JSON.stringify(body));
 
-      // 2. Extraire timestamp et signatures candidates (format officiel FedaPay: t=...,s=...)
+      // 2. Extraire le timestamp et la signature (format officiel : t=...,s=...)
       let timestamp = null;
       const candidates = [];
       const items = signatureHeader.split(',');
@@ -301,9 +315,16 @@ class FedaPayService {
           } else if (key === 's' || key === 'v1' || key === 'sha256') {
             candidates.push(val);
           }
-        } else if (parts.length === 1 && /^[0-9a-fA-F]{64}$/.test(parts[0].trim())) {
-          candidates.push(parts[0].trim());
         }
+        // NOTE : plus aucun cas d'acceptation d'un hexadécimal « nu » sans
+        // timestamp — c'était le point d'entrée du rejeu infini.
+      }
+
+      // 3. Le timestamp est OBLIGATOIRE : sans lui, aucune protection
+      //    anti-rejeu n'est possible, donc rien n'est accepté.
+      if (timestamp === null) {
+        console.warn('[FedaPay Webhook] ❌ Signature sans timestamp : rejetée (anti-rejeu impossible).');
+        return false;
       }
 
       if (candidates.length === 0) {
@@ -311,14 +332,12 @@ class FedaPayService {
         return false;
       }
 
-      // 3. Vérification de la tolérance temporelle (anti-rejeu) si un timestamp est présent (300 s)
-      if (timestamp !== null) {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const toleranceSec = 300;
-        if (Math.abs(nowSec - timestamp) > toleranceSec) {
-          console.warn(`[FedaPay Webhook] ❌ Rejet anti-rejeu : Timestamp hors tolérance (${timestamp} vs now: ${nowSec}).`);
-          return false;
-        }
+      // 4. Vérification de la tolérance temporelle (anti-rejeu) : 300 s
+      const nowSec = Math.floor(Date.now() / 1000);
+      const toleranceSec = 300;
+      if (Math.abs(nowSec - timestamp) > toleranceSec) {
+        console.warn(`[FedaPay Webhook] ❌ Rejet anti-rejeu : Timestamp hors tolérance (${timestamp} vs now: ${nowSec}).`);
+        return false;
       }
 
       // Comparaison en temps constant et sécurisée (évite ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH_MISMATCH)
@@ -329,26 +348,14 @@ class FedaPayService {
         return crypto.timingSafeEqual(hashExpected, hashCandidate);
       };
 
-      // 4. Calculer l'empreinte HMAC attendue
-      // Cas nominal FedaPay : signedPayload = `${timestamp}.${payloadString}`
-      if (timestamp !== null) {
-        const signedPayload = `${timestamp}.${payloadString}`;
-        const hmac = crypto.createHmac('sha256', this.webhookSecret);
-        const expectedSignature = hmac.update(signedPayload).digest('hex');
-
-        for (const candidate of candidates) {
-          if (timingSafeMatches(expectedSignature, candidate)) {
-            return true;
-          }
-        }
-      }
-
-      // Repli : HMAC direct sur le corps brut (si webhook sans préfixe timestamp)
-      const directHmac = crypto.createHmac('sha256', this.webhookSecret);
-      const expectedDirect = directHmac.update(payloadString).digest('hex');
+      // 5. Calculer l'empreinte HMAC attendue
+      // signedPayload = `${timestamp}.${payloadString}`
+      const signedPayload = `${timestamp}.${payloadString}`;
+      const hmac = crypto.createHmac('sha256', this.webhookSecret);
+      const expectedSignature = hmac.update(signedPayload).digest('hex');
 
       for (const candidate of candidates) {
-        if (timingSafeMatches(expectedDirect, candidate)) {
+        if (timingSafeMatches(expectedSignature, candidate)) {
           return true;
         }
       }
