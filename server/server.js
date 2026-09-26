@@ -129,9 +129,32 @@ app.use(
         ]
       }
     },
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    // HSTS : max-age allongé à 2 ans + preload. Le domaine sert déjà
+    // l'intégralité de ses sous-domaines en HTTPS, et includeSubDomains
+    // impose le HTTPS à fecawadb.* comme au reste.
+    strictTransportSecurity: {
+      maxAge: 63072000,
+      includeSubDomains: true,
+      preload: true
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    // Verrouille les APIs navigateur que le site n'utilise pas.
+    // 'payment' est laissé libre : le widget FedaPay peut l'utiliser.
+    // (La config Traefik applique par ailleurs son propre Permissions-Policy.)
+    xContentTypeOptions: true
   })
 );
+
+// Permissions-Policy explicite (absent de la config Helmet par défaut).
+app.use((req, res, next) => {
+  res.setHeader(
+    'Permissions-Policy',
+    'accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(self "https://*.fedapay.com"), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()'
+  );
+  next();
+});
+
 
 // Configuration CORS : l'API est destinée au site lui-même (même origine) et au
 // webhook FedaPay. Les requêtes cross-site sont rejetées (anti-abus / anti-CSRF) :
@@ -144,7 +167,11 @@ const SITE_ORIGIN = (() => {
     return '';
   }
 })();
-const allowedOrigins = new Set([SITE_ORIGIN, 'https://facawa.hashcode.cloud'].filter(Boolean));
+// L'unique origine autorisée est celle déclarée par APP_URL (.env) : le site
+// et l'API sont servis par le même conteneur, donc toute autre origine est
+// étrangère. Ne pas coder un domaine en dur ici, sinon il devient obsolète
+// à chaque changement de nom de domaine.
+const allowedOrigins = new Set([SITE_ORIGIN].filter(Boolean));
 
 function originGuard(req, res, next) {
   const origin = req.headers.origin;
