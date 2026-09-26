@@ -218,6 +218,18 @@
         return;
       }
 
+      // Jeton de reçu : stocké par app.js à la création de la transaction, dans
+      // le même onglet. C'est la preuve de propriété exigée par l'API pour
+      // délivrer un reçu nominatif. Son absence n'empêche pas l'affichage : le
+      // statut du paiement reste visible, seule l'identité du donataire est
+      // volontairement masquée.
+      let receiptToken = '';
+      try {
+        receiptToken = window.sessionStorage.getItem(`fecawa:receipt:${txId}`) || '';
+      } catch (storageErr) {
+        console.warn('Jeton de reçu indisponible :', storageErr);
+      }
+
       // 2. Suivi dynamique de la transaction réelle avec backoff progressif
       let pollCount = 0;
       const pollDelays = [2000, 3000, 4000, 6000, 8000, 10000]; // 6 vérifications échelonnées (~33 s max)
@@ -226,7 +238,9 @@
 
       async function checkPaymentStatus() {
         try {
-          const res = await fetch(`/api/verify-transaction/${encodeURIComponent(txId)}`);
+          const headers = {};
+          if (receiptToken) headers['X-Receipt-Token'] = receiptToken;
+          const res = await fetch(`/api/verify-transaction/${encodeURIComponent(txId)}`, { headers });
           const data = await res.json();
 
           if (!res.ok || !data.success) {
@@ -237,7 +251,7 @@
 
           // A. Paiement certifié et effectif (Approuvé)
           if (status === 'approved') {
-            renderApprovedState(data.donation, txId);
+            renderApprovedState(data.donation, txId, data.owned !== false);
             return;
           }
 
@@ -271,16 +285,21 @@
       }
 
       // ÉTAT 1 : Don Confirmé & Encaissé (Approved)
-      function renderApprovedState(donation, id) {
+      // `owned` = le jeton de reçu a été fourni. Sans lui, l'API ne renvoie
+      // aucune donnée personnelle : on affiche alors une confirmation
+      // simplifiée plutôt qu'un reçu vide aux champs à 0.
+      function renderApprovedState(donation, id, owned = true) {
+        const d = (owned && donation) || {};
+
         receiptLoading.classList.add('hidden');
         receiptDetails.classList.remove('hidden');
         blessingBanner.classList.remove('hidden');
         statusAlertBox.classList.add('hidden');
         retryBtn.classList.add('hidden');
         donateNowBtn.classList.add('hidden');
-        printBtn.classList.remove('hidden');
-        shareWhatsappBtn.classList.remove('hidden');
-        amountBanner.classList.remove('hidden');
+        printBtn.classList.toggle('hidden', !owned);
+        shareWhatsappBtn.classList.toggle('hidden', !owned);
+        amountBanner.classList.toggle('hidden', !owned);
 
         // Icône de validation
         statusIconWrap.className = 'confirmation-icon-wrap success';
@@ -293,7 +312,19 @@
         confirmationTitle.textContent = 'Paiement confirmé avec succès !';
         confirmationSubtitle.textContent = 'Votre généreuse contribution est validée et participe au rayonnement du festival.';
 
-        const d = donation || {};
+        if (!owned) {
+          // Session navigated sans jeton de reçu (nouvel onglet, session
+          // expirée) : on confirme la réussite sans exposer le détail du don.
+          receiptRef.textContent = id || '—';
+          receiptDonor.textContent = 'Votre don';
+          receiptAmount.textContent = 'Montant masqué';
+          receiptDate.textContent = new Date().toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+          receiptHeaderTitle.textContent = 'Confirmation de paiement';
+          receiptStatusBadge.className = 'receipt-badge';
+          receiptStatusBadge.textContent = 'Validé & Encaissé';
+          return;
+        }
+
         const formattedAmount = d.amount ? new Intl.NumberFormat('fr-FR').format(d.amount) : '0';
         bannerAmount.textContent = formattedAmount;
 

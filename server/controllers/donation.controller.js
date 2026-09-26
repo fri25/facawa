@@ -6,11 +6,39 @@ const { DonationRepository } = require('../config/database');
 const fedapayService = require('../services/fedapay.service');
 
 /**
- * Vue "reçu" d'une donation en respectant les choix de confidentialité.
- * Évite toute fuite PII via l'énumération des identifiants de transaction.
+ * Construit la réponse "reçu" d'une donation.
+ *
+ * SÉCURITÉ : la preuve de propriété (`ownsReceipt`) est exigée pour TOUTE donnée
+ * identifiante. Sans jeton, la réponse ne contient que le statut : ni nom, ni
+ * montant, ni référence, ni message. Avant cette correction,
+ * `/api/verify-transaction/:id` ne demandait rien et fuitait le nom, le
+ * montant, la référence et le message de tous les donateurs — y compris ceux
+ * dont le paiement a expiré, qui n'apparaissent pourtant dans aucune liste
+ * publique (getPublicSubscribers filtre sur status='approved').
+ *
+ * Le `message` (texte libre écrit par le donataire) n'est renvoyé qu'au
+ * donataire lui-même, preuve de propriété à l'appui : il ne circule jamais
+ * vers un tiers. Les choix d'anonymat (is_public) et de masquage de montant
+ * (hide_amount) continuent de s'appliquer intégralement.
+ *
+ * @param {Object} donation Ligne SQLite
+ * @param {boolean} ownsReceipt Le client a-t-il prouvé être le donataire ?
  */
-function privateReceiptView(donation) {
+function privateReceiptView(donation, ownsReceipt = false) {
   if (!donation) return null;
+  if (!ownsReceipt) {
+    // Vue réduite : prouve l'existence et l'état du paiement, rien de plus.
+    return {
+      reference: null,
+      firstname: null,
+      lastname: null,
+      amount: null,
+      currency: donation.currency,
+      date: null,
+      message: null
+    };
+  }
+
   const isPublic = Boolean(donation.is_public);
   const hideAmount = Boolean(donation.hide_amount);
   return {
@@ -70,8 +98,11 @@ const DonationController = {
         callbackUrl
       });
 
-      // 2. Enregistrement en base de données SQLite en état "pending"
-      const localDonation = DonationRepository.createPendingDonation({
+      // 2. Enregistrement en base de données SQLite en état "pending".
+      //    Le repository renvoie aussi le jeton de reçu : c'est la preuve de
+      //    propriété de la transaction, sans laquelle l'API ne divulguera
+      //    aucune donnée personnelle sur cette donation.
+      const { donation: localDonation, receiptToken } = DonationRepository.createPendingDonation({
         transactionId: fedaResponse.id,
         reference: fedaResponse.reference,
         firstname: data.firstname,
@@ -97,7 +128,11 @@ const DonationController = {
         checkoutUrl: fedaResponse.checkoutUrl,
         publicKey: process.env.FEDAPAY_PUBLIC_KEY || '',
         isSimulated: fedaResponse.isSimulated || false,
-        amount: data.amount
+        amount: data.amount,
+        // Jeton de reçu : à conserver côté navigateur (sessionStorage) puis à
+        // renvoyer dans l'en-tête X-Receipt-Token lors des vérifications de
+        // statut, faute de quoi le reçu reste volontairement anonyme.
+        receiptToken
       });
     } catch (error) {
       console.error('[Donation] Erreur création don:', error.message);
@@ -111,6 +146,12 @@ const DonationController = {
 
   /**
    * Vérifie le statut d'une transaction après le retour du donateur
+   *
+   * La preuve de propriété est lue dans l'en-tête `X-Receipt-Token` (le token
+   * FedaPay ne convient pas : il est public et présent dans l'URL de checkout).
+   * Sans jeton valide, seuls le statut et l'existence de la transaction sont
+   * révélés — ce qui suffit au frontend pour afficher "en cours de validation"
+   * sans exposer la PII du donataire à quiconque devine un ID.
    */
   async verifyTransaction(req, res) {
     try {
@@ -118,6 +159,11 @@ const DonationController = {
       if (!id || id === 'demo' || id === 'null' || id === 'undefined') {
         return res.status(400).json({ success: false, message: 'ID de transaction valide requis.' });
       }
+
+      const receiptToken = req.get('x-receipt-token') || '';
+      // Anti-énumération : la preuve est vérifiée avant tout appel sortant.
+      // Un attaquant qui parcours les ID ne déclenche donc aucun appel FedaPay.
+      const ownsReceipt = DonationRepository.ownsTransaction(id, receiptToken);
 
       // 1. Vérifier d'abord en base de données locale
       let donation = DonationRepository.getByTransactionId(id);
@@ -127,7 +173,8 @@ const DonationController = {
         return res.json({
           success: true,
           status: donation.status,
-          donation: privateReceiptView(donation)
+          owned: ownsReceipt,
+          donation: privateReceiptView(donation, ownsReceipt)
         });
       }
 
@@ -146,7 +193,20 @@ const DonationController = {
         return res.json({
           success: true,
           status: donation?.status || 'pending',
-          donation: privateReceiptView(donation)
+          owned: ownsReceipt,
+          donation: privateReceiptView(donation, ownsReceipt)
+        });
+      }
+
+      // Un client sans jeton ne déclenche pas d'appel sortant : le rate-limit
+      // reste contournable en théorie, on refuse donc de consommer le quota
+      // FedaPay pour une simple reconnaissance d'ID.
+      if (!ownsReceipt) {
+        return res.json({
+          success: true,
+          status: donation?.status || 'pending',
+          owned: false,
+          donation: privateReceiptView(donation, false)
         });
       }
 
@@ -171,14 +231,16 @@ const DonationController = {
         return res.json({
           success: true,
           status: status || donation?.status || 'pending',
-          donation: privateReceiptView(donation)
+          owned: true,
+          donation: privateReceiptView(donation, true)
         });
       } catch (fedaErr) {
         // En cas d'erreur de contact FedaPay, retourner l'état local actuel
         return res.json({
           success: true,
           status: donation?.status || 'pending',
-          donation: privateReceiptView(donation)
+          owned: true,
+          donation: privateReceiptView(donation, true)
         });
       }
     } catch (error) {

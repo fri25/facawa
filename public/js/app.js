@@ -271,7 +271,25 @@ document.addEventListener('DOMContentLoaded', () => {
           throw new Error(data.message || (data.errors && data.errors.join(' ')) || 'Erreur lors de l\'initialisation du don.');
         }
 
-        console.log('[Donation] Transaction initialisée avec succès:', data);
+        // Volontairement sans `data` : la réponse contient le receiptToken,
+        // un secret d'accès au reçu nominatif. Le journaliser dans la console
+        // du navigateur l'exposerait à tout partage d'écran ou outil de
+        // diagnostic tiers. On ne trace que l'identifiant de transaction.
+        console.log('[Donation] Transaction initialisée avec succès (id=%s)', data.transaction && data.transaction.id);
+
+        // Jeton de reçu : preuve de propriété de la transaction. Conservé dans
+        // sessionStorage (et non un cookie) pour que la page de confirmation,
+        // ouverte après le retour du widget FedaPay, puisse retrouver le reçu
+        // nominatif. Sans ce jeton, l'API ne renvoie volontairement ni nom,
+        // ni montant, ni référence : c'est ce qui empêche l'énumération des
+        // identifiants de transaction.
+        if (data.receiptToken) {
+          try {
+            window.sessionStorage.setItem(`fecawa:receipt:${data.transactionId}`, data.receiptToken);
+          } catch (storageErr) {
+            console.warn('[Donation] sessionStorage indisponible : le reçu restera anonyme.', storageErr);
+          }
+        }
 
         // Si la clé FedaPay est en mode simulation / démonstration locale
         if (data.isSimulated) {

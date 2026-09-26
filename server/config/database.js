@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 // Chemin vers la base de données
@@ -59,8 +60,88 @@ function initSchema() {
   console.log('[DB] Schéma SQLite initialisé avec succès.');
 }
 
+// -----------------------------------------------------------------------------
+// Migrations idempotentes
+// -----------------------------------------------------------------------------
+// `CREATE TABLE IF NOT EXISTS` ne fait RIEN sur une table déjà existante : sans
+// cette étape, une colonne ajoutée au schéma n'atteindrait jamais les bases
+// déjà déployées. ALTER TABLE n'est donc appliqué que si la colonne manque.
+function runMigrations() {
+  const migrations = [
+    // Jeton de reçu : preuve de propriété d'une transaction. Sans lui,
+    // n'importe qui pouvait énumérer les ID de transaction (entiers
+    // séquentiels) et lire nom, montant, référence et message des donateurs —
+    // y compris ceux dont le paiement a expiré et qui n'apparaissent donc
+    // dans aucune liste publique. Colonnes utilisées :
+    //   receipt_token_hash : SHA-256 du jeton (le jeton en clair n'est jamais stocké)
+    //   receipt_token_issued_at : horodatage d'émission
+    // `name` DOIT être le nom exact de la colonne ajoutée par `sql` : c'est
+    // lui que la détection d'idempotence compare à PRAGMA table_info.
+    {
+      name: 'receipt_token_hash',
+      sql: 'ALTER TABLE donations ADD COLUMN receipt_token_hash TEXT'
+    },
+    {
+      name: 'receipt_token_issued_at',
+      sql: 'ALTER TABLE donations ADD COLUMN receipt_token_issued_at DATETIME'
+    }
+  ];
+
+  for (const migration of migrations) {
+    const column = migration.name;
+    // `PRAGMA table_info` via prepare() est le seul moyen fiable avec
+    // node:sqlite : la forme table-valued `pragma_table_info('donations')`
+    // n'est pas supportée et renvoyait zéro ligne, ce qui faisait rejouer
+    // l'ALTER TABLE sur une colonne déjà existante.
+    const columns = db.prepare('PRAGMA table_info(donations)').all();
+    if (columns.some((c) => c.name === column)) continue;
+    try {
+      db.exec(migration.sql);
+      console.log(`[DB] Migration appliquée : ${column}`);
+    } catch (err) {
+      console.error(`[DB] Échec de la migration ${column} :`, err.message);
+    }
+  }
+}
+
 // Exécuter l'initialisation au chargement
 initSchema();
+runMigrations();
+
+/**
+ * Génère un jeton de reçu aléatoire et son empreinte stockable.
+ * 32 octets aléatoires → 64 caractères hexadécimaux, impossibles à deviner.
+ * Seul le SHA-256 est persisté : une fuite de la base ne donne pas les jetons
+ * exploitables (ils ne sont de toute façon valables que pour le don concerné).
+ *
+ * @returns {{ token: string, hash: string }}
+ */
+function issueReceiptToken() {
+  const token = crypto.randomBytes(32).toString('hex');
+  return { token, hash: hashReceiptToken(token) };
+}
+
+/**
+ * Empreinte SHA-256 d'un jeton de reçu, en temps constant côté comparaison.
+ * @param {string} token
+ * @returns {string} hexadécimal 64 caractères
+ */
+function hashReceiptToken(token) {
+  return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
+}
+
+/**
+ * Comparaison à temps constant de deux empreintes de jeton.
+ * @returns {boolean}
+ */
+function safeCompareHash(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const bufA = Buffer.from(a.toLowerCase(), 'utf8');
+  const bufB = Buffer.from(b.toLowerCase(), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 
 // Couche d'accès aux données (DAO / Repository)
 const DonationRepository = {
@@ -83,12 +164,17 @@ const DonationRepository = {
       fedaToken = null
     } = data;
 
+    // Preuve de propriété de la transaction : le jeton en clair est renvoyé au
+    // donateur (et à lui seul), seule son empreinte est persistée.
+    const { token, hash } = issueReceiptToken();
+
     const stmt = db.prepare(`
       INSERT INTO donations (
         transaction_id, reference, firstname, lastname, phone, email,
         amount, currency, message, is_public, hide_amount, status,
-        payment_method, feda_token, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, ?, datetime('now'), datetime('now'))
+        payment_method, feda_token, receipt_token_hash, receipt_token_issued_at,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, ?, ?, datetime('now'), datetime('now'), datetime('now'))
     `);
 
     const result = stmt.run(
@@ -103,11 +189,60 @@ const DonationRepository = {
       message ? message.trim() : null,
       isPublic ? 1 : 0,
       hideAmount ? 1 : 0,
-      fedaToken
+      fedaToken,
+      hash
     );
 
-    return this.getById(result.lastInsertRowid);
+    return { donation: this.getById(result.lastInsertRowid), receiptToken: token };
   },
+
+  /**
+   * Récupère une souscription par son ID de transaction FedaPay
+   */
+  getByTransactionId(transactionId) {
+    if (!transactionId) return null;
+    const stmt = db.prepare('SELECT * FROM donations WHERE transaction_id = ?');
+    return stmt.get(String(transactionId));
+  },
+
+  /**
+   * Vérifie qu'un jeton de reçu correspond bien à la transaction demandée.
+   * Comparaison en temps constant sur les empreintes SHA-256.
+   *
+   * @param {string|number} transactionId
+   * @param {string} token Jeton en clair présenté par le client
+   * @returns {boolean}
+   */
+  ownsTransaction(transactionId, token) {
+    if (!transactionId || typeof token !== 'string' || !token) return false;
+    const donation = this.getByTransactionId(transactionId);
+    if (!donation || !donation.receipt_token_hash) return false;
+    return safeCompareHash(donation.receipt_token_hash, hashReceiptToken(token));
+  },
+
+  /**
+   * Associe (ou régénère) le jeton de reçu d'une transaction créée hors de
+   * l'application (ex: import,_slack webhook antérieur au déploiement).
+   * @returns {string} jeton en clair
+   */
+  ensureReceiptToken(transactionId) {
+    const existing = this.getByTransactionId(transactionId);
+    if (existing && existing.receipt_token_hash) {
+      // Un jeton existe déjà mais le donataire ne l'a jamais reçu : on ne peut
+      // pas le lui retransmettre (seule l'empreinte est stockée). On n'en
+      // fabrique pas de nouveau ici — l'absence de jeton reste gérable.
+      return null;
+    }
+    const { token, hash } = issueReceiptToken();
+    const stmt = db.prepare(`
+      UPDATE donations
+      SET receipt_token_hash = ?, receipt_token_issued_at = datetime('now')
+      WHERE transaction_id = ?
+    `);
+    stmt.run(hash, String(transactionId));
+    return token;
+  },
+
 
   /**
    * Récupère une souscription par son ID interne
@@ -288,5 +423,8 @@ const DonationRepository = {
 
 module.exports = {
   db,
-  DonationRepository
+  DonationRepository,
+  issueReceiptToken,
+  hashReceiptToken,
+  safeCompareHash
 };
