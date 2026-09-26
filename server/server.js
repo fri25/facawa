@@ -2,7 +2,7 @@
  * Serveur Express principal - Plateforme de souscription FeCAWa 2026.
  */
 
-const net = require('net');
+const crypto = require('crypto');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
@@ -13,94 +13,61 @@ const rateLimit = require('express-rate-limit');
 // Initialisation de la base SQLite
 require('./config/database');
 
+const { getClientIp } = require('./services/client-ip.service');
 const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration 'trust proxy' robuste (Issues #6 & #13)
-// Fait confiance aux requêtes transitant par les réseaux privés Docker (Traefik).
-// Ne fait PAS confiance au loopback par défaut afin d'empêcher le spoofing XFF direct en local.
-app.set('trust proxy', (ip) => isTrustedProxy(ip));
-
 /**
- * Vérifie si une adresse IP correspond à notre reverse proxy de confiance (Traefik sur réseau Docker)
+ * Portail anti-accès direct (CWE-441).
+ *
+ * Le conteneur n'est joignable que via Traefik. Sans ce garde-fou, tout
+ * conteneur partageant le réseau Docker 'proxy' (~10 autres applications sur
+ * cet hôte) pouvait interroger l'API directement, en contournant Traefik,
+ * Cloudflare ET les rate-limits. Constaté : 3 conteneurs tiers ont pu lire
+ * les PII des donateurs via http://fecawa:3000.
+ *
+ * Traefik applique un middleware 'headers' dont `customRequestHeaders`
+ * *écrase* (et non n'ajoute) l'en-tête ci-dessous : la valeur reçue par
+ * l'application est donc toujours celle de Traefik, jamais celle du client.
+ * Le secret est partagé via .env → variable du compose (FECAWAY_GATE_SECRET).
+ *
+ * Le loopback est exempté : c'est le seul cas où un pair de confiance n'est
+ * pas Traefik (healthcheck Docker interne, `docker exec` de débogage).
+ *
+ * Si le secret n'est pas configuré, le contrôle est désactivé (développement).
  */
-function isTrustedProxy(ip) {
-  if (!ip) return false;
-  const clean = ip.replace(/^::ffff:/, '').trim();
+const GATE_HEADER = 'x-fecawa-gate';
+const GATE_SECRET = process.env.FECAWAY_GATE_SECRET || '';
 
-  // Autorisé en test ou configuration explicite
-  if (process.env.TRUST_LOOPBACK_PROXY === 'true') {
-    if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost') return true;
+function proxyGate(req, res, next) {
+  if (!GATE_SECRET) return next();
+  if (!GATE_SECRET.length || GATE_SECRET.length < 32) {
+    console.error('[Portail] FECAWAY_GATE_SECRET trop court (<32 caractères) : contrôle ignoré.');
+    return next();
   }
 
-  // Sous-réseaux privés Docker (RFC 1918) où opère Traefik
-  if (clean.startsWith('10.') || clean.startsWith('192.168.')) return true;
-  const m172 = clean.match(/^172\.(\d+)\./);
-  if (m172) {
-    const octet = parseInt(m172[1], 10);
-    if (octet >= 16 && octet <= 31) return true;
+  const peer = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  if (peer === '127.0.0.1' || peer === '::1') return next();
+
+  const presented = req.headers[GATE_HEADER];
+  if (typeof presented !== 'string' || presented.length !== GATE_SECRET.length) {
+    console.warn(`[Portail] Accès direct bloqué depuis ${peer || 'IP inconnue'} (en-tête ${GATE_HEADER} absent ou invalide).`);
+    return res.status(403).json({ success: false, message: 'Accès direct non autorisé.' });
   }
-  return false;
+
+  const expected = Buffer.from(GATE_SECRET, 'utf8');
+  const given = Buffer.from(presented, 'utf8');
+  if (!crypto.timingSafeEqual(expected, given)) {
+    console.warn(`[Portail] Accès direct bloqué depuis ${peer} (secret ${GATE_HEADER} incorrect).`);
+    return res.status(403).json({ success: false, message: 'Accès direct non autorisé.' });
+  }
+
+  next();
 }
 
-/**
- * Vérifie si une adresse IP appartient aux sous-réseaux privés RFC 1918 ou loopback
- */
-function isPrivateOrLoopback(ip) {
-  if (!ip) return false;
-  const clean = ip.replace(/^::ffff:/, '').trim();
-  if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost') return true;
-  if (clean.startsWith('10.') || clean.startsWith('192.168.')) return true;
-  const m172 = clean.match(/^172\.(\d+)\./);
-  if (m172) {
-    const octet = parseInt(m172[1], 10);
-    if (octet >= 16 && octet <= 31) return true;
-  }
-  if (/^(fc|fd|fe80)/i.test(clean)) return true;
-  return false;
-}
-
-/**
- * Résolution déterministe et anti-spoofing de l'adresse IP cliente.
- * Résout #6 (cohérence Cloudflare + Traefik) et #13 (anti-contournement rate limit par X-Forwarded-For).
- */
-function getClientIp(req) {
-  const remoteSocket = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '').trim();
-  const isFromProxy = isTrustedProxy(remoteSocket);
-
-  // 1. Si la requête transite par notre reverse-proxy de confiance (Traefik / Docker network) :
-  if (isFromProxy) {
-    // A. Priorité absolue : header Cloudflare CF-Connecting-IP (inviolable derrière Cloudflare)
-    const cfIp = req.headers['cf-connecting-ip'];
-    if (cfIp && typeof cfIp === 'string') {
-      const cleanCf = cfIp.replace(/^::ffff:/, '').trim();
-      if (net.isIP(cleanCf)) {
-        return cleanCf;
-      }
-    }
-
-    // B. Chaîne X-Forwarded-For : extraire la première IP non privée depuis la droite
-    const xff = req.headers['x-forwarded-for'];
-    if (xff && typeof xff === 'string') {
-      const parts = xff.split(',').map(p => p.replace(/^::ffff:/, '').trim()).filter(Boolean);
-      for (let i = parts.length - 1; i >= 0; i--) {
-        const candidate = parts[i];
-        if (net.isIP(candidate) && !isPrivateOrLoopback(candidate)) {
-          return candidate;
-        }
-      }
-      if (parts.length > 0 && net.isIP(parts[0])) {
-        return parts[0];
-      }
-    }
-  }
-
-  // 2. Connexion directe sans proxy de confiance :
-  // Tout header XFF ou CF envoyé directement depuis l'extérieur est ignoré (anti-spoofing #13)
-  return remoteSocket || '127.0.0.1';
-}
+app.use(proxyGate);
 
 // Configuration de la sécurité avec Helmet (adapté pour le widget FedaPay Checkout.js)
 app.use(
@@ -108,10 +75,15 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
+        // 'unsafe-eval' a été RETIRÉ : aucune évaluation de chaîne n'est utilisée
+        // par le front (vérifié : 0 occurrence de eval/new Function), et
+        // `eval()` transforme toute injection en exécution de code.
+        // 'unsafe-inline' reste nécessaire : les pages HTML statiques portent
+        // des scripts/styles inline et des handlers onclick. Le supprimer
+        // exigera de passer par des nonces par requête (refonte).
         scriptSrc: [
           "'self'",
           "'unsafe-inline'",
-          "'unsafe-eval'",
           "https://cdn.fedapay.com",
           "https://checkout.fedapay.com",
           "https://*.fedapay.com",
@@ -198,6 +170,22 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 // -----------------------------------------------------------------------------
 // Rate Limiters - Protection Anti-Abus / Anti-Scraping / Anti-Spam (Issues #7 & #13)
 // -----------------------------------------------------------------------------
+//
+// `keyGenerator` s'appuie sur getClientIp() (voir services/client-ip.service.js)
+// qui ne fait confiance qu'aux en-têtes AJOUTÉS par le proxy. Auparavant, la
+// clé venait de `trust proxy` (fonction « toute IP privée est un proxy de
+// confiance ») alors que CF-Connecting-IP était lu en priorité absolue : une
+// IP forgée suffisait à obtenir un compteur neuf à chaque requête.
+//
+// `validate.trustProxy` est aligned sur le nombre de sauts de confiance réel
+// (Cloudflare → Traefik → app) uniquement pour que la validation interne
+// d'express-rate-limit ne rejette pas la configuration ; la clé elle-même est
+// calculée par getClientIp(). `xForwardedForHeader: false` désactive la
+// vérification d'en-tête superflue.
+const RATE_LIMIT_VALIDATE = {
+  trustProxy: parseInt(process.env.TRUSTED_PROXY_HOPS || '2', 10) || 0,
+  xForwardedForHeader: false
+};
 
 // Limiteur global sur l'ensemble de l'API (sauf webhook FedaPay signé par HMAC)
 const apiGlobalLimiter = rateLimit({
@@ -210,7 +198,7 @@ const apiGlobalLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { trustProxy: false, xForwardedForHeader: false },
+  validate: RATE_LIMIT_VALIDATE,
   skip: (req) => req.path === '/webhook/fedapay' || req.path === '/api/webhook/fedapay'
 });
 
@@ -225,7 +213,7 @@ const donationLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { trustProxy: false, xForwardedForHeader: false }
+  validate: RATE_LIMIT_VALIDATE
 });
 
 // Limiteur pour la vérification de transaction (anti-énumération & quotas FedaPay sortants)
@@ -239,7 +227,7 @@ const verifyLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { trustProxy: false, xForwardedForHeader: false }
+  validate: RATE_LIMIT_VALIDATE
 });
 
 // Limiteur pour les lectures publiques (/api/subscribers et /api/stats)
@@ -253,7 +241,7 @@ const publicReadLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { trustProxy: false, xForwardedForHeader: false }
+  validate: RATE_LIMIT_VALIDATE
 });
 
 // Montage des limiteurs sur les routes

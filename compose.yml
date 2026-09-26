@@ -1,7 +1,7 @@
 # FeCAWa 2026 — Conteneur Node.js/Express derrière Traefik (réseau externe "proxy")
 #
 # Toutes les variables proviennent de .env (env_file) :
-#   - DOMAIN            → domaine public (ex: don.fecawa-waama.org) utilisé par Traefik
+#   - DOMAIN            → domaine public (ex: fecawa.com) utilisé par Traefik
 #   - PORT              → port écoute interne (défaut 3000)
 #   - FEDAPAY_*         → clés API FedaPay + secret webhook
 #   - APP_URL, NODE_ENV → configuration applicative
@@ -64,6 +64,29 @@ services:
 
       # Service / load-balancer vers le port 3000 (PORT interne)
       - "traefik.http.services.fecawa.loadbalancer.server.port=3000"
+
+      # 🔒 Portail anti-accès direct (voir server.js : proxyGate).
+      # `customRequestHeaders` ÉCRASE l'en-tête (il ne l'ajoute pas) : la valeur
+      # que reçoit l'application est donc toujours celle de Traefik, jamais
+      # celle d'un client, et seul Traefik peut la connaître. Sans cela, tout
+      # conteneur du réseau Docker partagé 'proxy' (~10 autres applications sur
+      # cet hôte) pouvait interroger l'API directement en contournant Traefik,
+      # Cloudflare et les rate-limits.
+      #
+      # 🔒 `fecawa-cfonly` (ipwhitelist) va plus loin : il rejette au niveau
+      # Traefik toute requête dont l'IP source n'est pas une IP Cloudflare.
+      # Cloudflare est donc le SEUL chemin d'accès possible vers l'application.
+      # Pourquoi au niveau du routeur et pas dans UFW : les ports 80/443 de
+      # cet hôte sont publiés en Docker, donc DNATés et filtrés par la chaîne
+      # FORWARD, que les règles UFW (INPUT) ne voit jamais ; et surtout
+      # 4 autres domaines servis par le même Traefik (mecanotic-auto.com,
+      # brennmaterial-express.de et leurs www) ne sont PAS derrière Cloudflare
+      # et pointeurs en direct sur l'IP d'origine. Un blocage 80/443 global
+      # les mettrait hors service. Cette restriction est donc ciblée sur les
+      # deux routeurs Cloudflare de ce projet, sans effet sur les autres.
+      - "traefik.http.routers.fecawa.middlewares=fecawa-cfonly,fecawa-gate"
+      - "traefik.http.middlewares.fecawa-cfonly.ipwhitelist.sourceRange=${CLOUDFLARE_IP_RANGES}"
+      - "traefik.http.middlewares.fecawa-gate.headers.customRequestHeaders.X-Fecawa-Gate=${FECAWAY_GATE_SECRET}"
 
       # Redirection HTTP → HTTPS (optionnel, si tu n'as pas de redirect séparé)
       - "traefik.http.routers.fecawa-http.entrypoints=web"
