@@ -8,7 +8,12 @@
 #
 # Contexte de build : racine du dépôt (./adminer/Dockerfile).
 # =============================================================================
-FROM adminer:latest
+# Version ÉPINGLÉE : `latest` rend les mises à jour subies et les régressions
+# impossibles à corréler (le plugin `fecawa-sqlite-auto` s'appuie sur la
+# signature `login(string,string): bool` de `Adminer\Plugin`, introduite en
+# Adminer 5 : un saut de version majeur casserait silencieusement
+# l'auto-connexion). Version constatée en place le 2026-09-26 : 6.1.1.
+FROM adminer:6.1.1
 
 COPY logo_new.jpeg /var/www/html/fecawa-logo.jpeg
 COPY adminer/fecawa-branding.css /var/www/html/fecawa-branding.css
