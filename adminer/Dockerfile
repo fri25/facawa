@@ -12,8 +12,11 @@
 # impossibles à corréler (le plugin `fecawa-sqlite-auto` s'appuie sur la
 # signature `login(string,string): bool` de `Adminer\Plugin`, introduite en
 # Adminer 5 : un saut de version majeur casserait silencieusement
-# l'auto-connexion). Version constatée en place le 2026-09-26 : 6.1.1.
-FROM adminer:6.1.1
+# l'auto-connexion). Version retenue : 6.3.0 (PHP 8.4.27, corrigé PHP2Shell).
+FROM adminer:6.3.0
+
+# Durcissement PHP2Shell (CVE-2026-109619), en plus du PHP 8.4.27 corrigé.
+COPY adminer/php-hardening.ini /usr/local/etc/php/conf.d/zz-hardening.ini
 
 COPY logo_new.jpeg /var/www/html/fecawa-logo.jpeg
 COPY adminer/fecawa-branding.css /var/www/html/fecawa-branding.css
