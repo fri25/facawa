@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>FeCAWa 2026 – Relevé des souscriptions (accès réservé)</title>
+
+  <!--
+    Page d'export réservée à l'organisation.
+
+    Elle n'est liée depuis AUCUNE page du site et déclare explicitement
+    noindex/nofollow : sa présence dans un moteur de recherche n'a aucun
+    intérêt et exposerait l'existence d'un point d'accès aux PII.
+
+    Elle ne contient aucune donnée : le jeton saisi n'est envoyé que dans
+    l'en-tête X-Export-Token de l'appel /api/admin/export.csv, et n'est conservé
+    que dans le sessionStorage de l'onglet (et effacé à la fermeture du
+    navigateur). Sans jeton valide, l'API répond 401.
+  -->
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="">
+  <meta name="theme-color" content="#C85A32">
+
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    /* Styles locaux : cette page n'est pas destinée à évoluer avec le site. */
+    body.export-page { padding: 0 0 60px; }
+    .export-wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px; }
+    .export-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 32px 28px;
+    }
+    .export-title { font-size: 1.7rem; margin: 0 0 6px; color: var(--text); }
+    .export-sub { color: var(--muted); margin: 0 0 26px; font-size: 0.98rem; }
+    .export-label {
+      display: block; font-weight: 600; font-size: 0.9rem;
+      color: var(--text); margin-bottom: 8px;
+    }
+    .export-input {
+      width: 100%; padding: 14px 16px; font-size: 1rem;
+      border: 1px solid var(--border); border-radius: 12px;
+      background: var(--panel-soft); color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .export-input:focus {
+      outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand);
+    }
+    .export-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+    .export-btn {
+      border: 0; border-radius: 12px; padding: 14px 22px;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+      background: var(--brand); color: #fff;
+    }
+    .export-btn:hover { background: var(--brand-dark); }
+    .export-btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+    .export-btn-secondary { background: var(--brand-soft); color: var(--brand-dark); }
+    .export-btn-secondary:hover { background: var(--border); }
+    .export-msg { margin-top: 18px; padding: 14px 16px; border-radius: 12px; font-size: 0.94rem; display: none; }
+    .export-msg.ok { display: block; background: var(--success-bg); color: var(--success); border: 1px solid #bfe3cd; }
+    .export-msg.ko { display: block; background: #fdf2f2; color: #9b1c1c; border: 1px solid #f5c2c2; }
+    .export-summary {
+      margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--border);
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px;
+    }
+    .export-stat { background: var(--panel-soft); border-radius: 12px; padding: 14px 16px; }
+    .export-stat-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    .export-stat-value { font-size: 1.25rem; font-weight: 800; color: var(--text); margin-top: 4px; }
+    .export-note { margin-top: 26px; font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+    .export-note code {
+      background: var(--panel-soft); padding: 2px 6px; border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em;
+    }
+  </style>
+</head>
+<body class="export-page">
+
+  <header class="site-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <a href="/" class="brand-link">
+          <div class="brand-mark">
+            <img src="/assets/logo.jpeg" alt="Logo FeCAWa" onerror="this.src='/assets/favicon.svg'">
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">FeCAWa</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="/" class="nav-link">Retour au site</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="export-wrap">
+    <div class="export-card">
+      <h1 class="export-title">Relevé des souscriptions</h1>
+      <p class="export-sub">
+        Export complet de tous les dons encaissés, expirés, refusés et en attente —
+        avec les coordonnées des donateurs. À n'utiliser que pour le rapprochement
+        comptable et l'émission des reçus.
+      </p>
+
+      <form id="exportForm" autocomplete="off">
+        <label class="export-label" for="tokenInput">Jeton d'export</label>
+        <input
+          class="export-input"
+          type="password"
+          id="tokenInput"
+          name="token"
+          placeholder="Colle ici le jeton (FECAWAY_EXPORT_TOKEN du serveur)"
+          autocomplete="off"
+          spellcheck="false"
+          required>
+        <div class="export-actions">
+          <button type="submit" class="export-btn" id="downloadBtn">Télécharger le CSV</button>
+          <button type="button" class="export-btn export-btn-secondary" id="forgetBtn">Oublier le jeton</button>
+        </div>
+      </form>
+
+      <div class="export-msg" id="exportMsg" role="status" aria-live="polite"></div>
+
+      <!--
+        Le récapitulatif (dons encaissés, montant collecté, 24 h) n'est calculé
+        QU'APRÈS un téléchargement réussi, à partir du CSV lui-même. Il n'y a
+        donc aucun appel à /api/stats depuis cette page : ni le nombre de
+        donateurs ni le montant collecté ne sont affichés — ni même stockés en
+        mémoire — avant que le jeton n'ait été validé par le serveur.
+      -->
+      <div class="export-summary" id="exportSummary" hidden>
+        <div class="export-stat">
+          <div class="export-stat-label">Dons encaissés</div>
+          <div class="export-stat-value" id="statDonors">—</div>
+        </div>
+        <div class="export-stat">
+          <div class="export-stat-label">Montant collecté</div>
+          <div class="export-stat-value" id="statAmount">—</div>
+        </div>
+        <div class="export-stat">
+          <div class="export-stat-label">24 dernières heures</div>
+          <div class="export-stat-value" id="statRecent">—</div>
+        </div>
+      </div>
+
+      <p class="export-note">
+        <strong>Où trouver le jeton ?</strong> Dans le fichier <code>.env</code> du serveur,
+        variable <code>FECAWAY_EXPORT_TOKEN</code>. Il n'est jamais transmis dans une URL :
+        il voyage dans un en-tête HTTP, il n'apparaît donc ni dans les logs du serveur,
+        ni dans l'historique du navigateur. Il est conservé uniquement dans cet onglet
+        (sessionStorage) et effacé à sa fermeture.<br><br>
+        <strong>Le CSV contient des données personnelles</strong> (noms, téléphones, e-mails,
+        messages) : ne le transférez pas par messagerie ouverte et supprimez-le après usage.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const STORAGE_KEY = 'fecawa:export-token';
+      const form = document.getElementById('exportForm');
+      const tokenInput = document.getElementById('tokenInput');
+      const downloadBtn = document.getElementById('downloadBtn');
+      const forgetBtn = document.getElementById('forgetBtn');
+      const msg = document.getElementById('exportMsg');
+      const exportSummary = document.getElementById('exportSummary');
+      const statDonors = document.getElementById('statDonors');
+      const statAmount = document.getElementById('statAmount');
+      const statRecent = document.getElementById('statRecent');
+
+      const nf = new Intl.NumberFormat('fr-FR');
+      const showOk = (text) => { msg.className = 'export-msg ok'; msg.textContent = text; };
+      const showKo = (text) => { msg.className = 'export-msg ko'; msg.textContent = text; };
+      const clearMsg = () => { msg.className = 'export-msg'; msg.textContent = ''; };
+
+      // Le récapitulatif reste masqué tant qu'aucun export n'a abouti.
+      const hideSummary = () => {
+        exportSummary.hidden = true;
+        statDonors.textContent = '—';
+        statAmount.textContent = '—';
+        statRecent.textContent = '—';
+      };
+
+      /**
+       * Découpe une ligne CSV en champs.
+       * Le serveur produit des champs TOUJOURS entourés de guillemets doubles
+       * (guillemets internes doublés) : on peut donc compter les guillemets
+       * sans worrying des virgules ou points-virgules dans un message.
+       */
+      const parseCsvLine = (line) => {
+        const cells = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (inQuotes) {
+            if (char === '"') {
+              if (line[i + 1] === '"') { current += '"'; i++; } else { inQuotes = false; }
+            } else {
+              current += char;
+            }
+          } else if (char === '"') {
+            inQuotes = true;
+          } else if (char === ';') {
+            cells.push(current);
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        cells.push(current);
+        return cells;
+      };
+
+      /**
+       * Calcule le récapitulatif À PARTIR DU CSV téléchargé.
+       * Aucun appel réseau : les chiffres affichés sont exactement ceux du
+       * fichier remis à l'utilisateur, ce qui évite toute divergence entre
+       * l'écran et l'export.
+       */
+      const renderSummaryFromCsv = (text) => {
+        const lines = text.split('\r\n').filter((l) => l.trim().length > 0);
+        if (lines.length < 2) { hideSummary(); return; }
+
+        const headers = parseCsvLine(lines[0]);
+        const index = (name) => headers.indexOf(name);
+        const colStatus = index('statut');
+        const colAmount = index('montant');
+        const colDate = index('date_creation');
+        if (colStatus < 0 || colAmount < 0 || colDate < 0) { hideSummary(); return; }
+
+        const since = Date.now() - 24 * 60 * 60 * 1000;
+        let donors = 0;
+        let total = 0;
+        let recent = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCsvLine(lines[i]);
+          // Seuls les dons ENCAISSÉS comptent : la cagnotte ne parle que d'eux.
+          if (String(cells[colStatus]).trim() !== 'approved') continue;
+          const amount = parseInt(String(cells[colAmount]).replace(/\D/g, ''), 10);
+          if (Number.isFinite(amount)) total += amount;
+          donors++;
+          // Les horodatages du serveur sont en UTC ('YYYY-MM-DD HH:MM:SS').
+          const date = new Date(String(cells[colDate]).trim().replace(' ', 'T') + 'Z');
+          if (!Number.isNaN(date.getTime()) && date.getTime() >= since) recent++;
+        }
+
+        statDonors.textContent = nf.format(donors);
+        statAmount.textContent = `${nf.format(total)} FCFA`;
+        statRecent.textContent = nf.format(recent);
+        exportSummary.hidden = false;
+      };
+
+      // Jeton déjà saisi dans cet onglet : on le recharge sans le réécrire à l'écran.
+      let stored = '';
+      try {
+        stored = window.sessionStorage.getItem(STORAGE_KEY) || '';
+      } catch (storageErr) {
+        console.warn('sessionStorage indisponible : le jeton ne sera pas mémorisé.', storageErr);
+      }
+      if (stored) {
+        tokenInput.value = stored;
+        showOk('Jeton mémorisé dans cet onglet. Clique sur « Télécharger le CSV ».');
+      }
+      hideSummary();
+
+      forgetBtn.addEventListener('click', () => {
+        try { window.sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* sans conséquence */ }
+        tokenInput.value = '';
+        clearMsg();
+        // Le jeton est effacé : le récapitulatif doit disparaître avec lui.
+        hideSummary();
+        tokenInput.focus();
+      });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMsg();
+
+        const token = tokenInput.value.trim();
+        if (!token) {
+          showKo('Colle d\'abord le jeton d\'export.');
+          return;
+        }
+
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = 'Téléchargement…';
+        // Tant que le téléchargement n'a pas abouti, aucun chiffre ne doit
+        // rester affiché : un jeton expiré ne doit pas laisser un ancien
+        // récapitulatif à l'écran.
+        let downloaded = false;
+
+        try {
+          const res = await fetch('/api/admin/export.csv', {
+            headers: { 'X-Export-Token': token }
+          });
+
+          if (res.status === 401) {
+            showKo('Jeton invalide. Vérifie la variable FECAWAY_EXPORT_TOKEN du serveur.');
+            return;
+          }
+          if (res.status === 503) {
+            showKo('Export désactivé sur le serveur (aucun jeton configuré).');
+            return;
+          }
+          if (res.status === 429) {
+            showKo('Trop de tentatives. Attends quelques minutes avant de réessayer.');
+            return;
+          }
+          if (!res.ok) {
+            showKo('Erreur serveur (' + res.status + '). Réessaie dans un instant.');
+            return;
+          }
+
+          const blob = await res.blob();
+          // Nom de fichier repris de l'en-tête Content-Disposition si possible.
+          const disposition = res.headers.get('Content-Disposition') || '';
+          const match = /filename="([^"]+)"/.exec(disposition);
+          const filename = match ? match[1] : 'fecawa-souscriptions.csv';
+
+          // Le récapitulatif n'est calculé qu'ici, sur le contenu réellement
+          // reçu : tant que le jeton n'est pas validé, aucun chiffre de la
+          // cagnotte n'apparaît sur cette page.
+          try {
+            renderSummaryFromCsv(await blob.text());
+          } catch (summaryErr) {
+            console.warn('Récapitulatif indisponible :', summaryErr);
+            hideSummary();
+          }
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          // Libère le blob : sans cela, le fichier reste en mémoire jusqu'au
+          // rechargement de l'onglet.
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+          downloaded = true;
+
+          // Le jeton n'est mémorisé qu'APRÈS un téléchargement réussi : inutile
+          // de garder en session un jeton erroné.
+          try { window.sessionStorage.setItem(STORAGE_KEY, token); } catch (e) { /* sans conséquence */ }
+
+          showOk('Fichier téléchargé (' + filename + '). Il contient des données personnelles : supprime-le après usage.');
+        } catch (err) {
+          console.error('Export :', err);
+          showKo('Téléchargement impossible. Vérifie ta connexion et réessaie.');
+        } finally {
+          if (!downloaded) hideSummary();
+          downloadBtn.disabled = false;
+          downloadBtn.textContent = 'Télécharger le CSV';
+        }
+      });
+
+      tokenInput.focus();
+    });
+  </script>
+</body>
+</html>

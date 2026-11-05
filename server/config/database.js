@@ -54,6 +54,18 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(status);
     CREATE INDEX IF NOT EXISTS idx_donations_created_at ON donations(created_at);
     CREATE INDEX IF NOT EXISTS idx_donations_transaction_id ON donations(transaction_id);
+
+    -- État applicatif persistant (paires clé/valeur).
+    -- Volontairement SÉPARÉ de donations : ces lignes ne sont ni des dons ni
+    -- des données de donateurs, et ne doivent donc jamais apparaître dans un
+    -- export, un relevé public ou une statistique de la cagnotte.
+    -- Sert notamment à horodater la dernière notification FedaPay reçue, ce qui
+    -- permet de détecter un canal de notification mort (cf. watchdog).
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `;
 
   db.exec(schemaSql);
@@ -84,6 +96,14 @@ function runMigrations() {
     {
       name: 'receipt_token_issued_at',
       sql: 'ALTER TABLE donations ADD COLUMN receipt_token_issued_at DATETIME'
+    },
+    // Fournisseur de paiement ayant créé la transaction. Indispensable pour
+    // vérifier chaque ligne chez SON fournisseur : sans cette colonne, une
+    // bascule FedaPay→Moneroo ferait interroger Moneroo pour d'anciennes
+    // transactions FedaPay → 404 → marquées annulées → encaissement réel perdu.
+    {
+      name: 'provider',
+      sql: 'ALTER TABLE donations ADD COLUMN provider TEXT'
     }
   ];
 
@@ -101,6 +121,16 @@ function runMigrations() {
     } catch (err) {
       console.error(`[DB] Échec de la migration ${column} :`, err.message);
     }
+  }
+
+  // Backfill TOUJOURS exécuté (idempotent) : toutes les lignes antérieures à
+  // l'ajout de la colonne `provider` ont nécessairement été créées par FedaPay,
+  // puisque Moneroo est nouveau. On les rattache explicitement à 'fedapay' pour
+  // que la réconciliation les interroge au bon endroit.
+  try {
+    db.exec("UPDATE donations SET provider = 'fedapay' WHERE provider IS NULL");
+  } catch (err) {
+    console.error('[DB] Échec du backfill provider :', err.message);
   }
 }
 
@@ -161,7 +191,8 @@ const DonationRepository = {
       message = null,
       isPublic = 1,
       hideAmount = 0,
-      fedaToken = null
+      fedaToken = null,
+      provider = null
     } = data;
 
     // Preuve de propriété de la transaction : le jeton en clair est renvoyé au
@@ -172,9 +203,9 @@ const DonationRepository = {
       INSERT INTO donations (
         transaction_id, reference, firstname, lastname, phone, email,
         amount, currency, message, is_public, hide_amount, status,
-        payment_method, feda_token, receipt_token_hash, receipt_token_issued_at,
+        payment_method, provider, feda_token, receipt_token_hash, receipt_token_issued_at,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
     `);
 
     const result = stmt.run(
@@ -189,6 +220,7 @@ const DonationRepository = {
       message ? message.trim() : null,
       isPublic ? 1 : 0,
       hideAmount ? 1 : 0,
+      provider ? String(provider).toLowerCase() : null,
       fedaToken,
       hash
     );
@@ -291,8 +323,8 @@ const DonationRepository = {
       INSERT INTO donations (
         transaction_id, reference, firstname, lastname, phone, email,
         amount, currency, message, is_public, hide_amount, status,
-        payment_method, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, datetime('now'), datetime('now'))
+        payment_method, provider, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, datetime('now'), datetime('now'))
     `);
 
     const result = stmt.run(
@@ -307,7 +339,8 @@ const DonationRepository = {
       data.message || null,
       data.isPublic !== undefined ? (data.isPublic ? 1 : 0) : 1,
       data.hideAmount !== undefined ? (data.hideAmount ? 1 : 0) : 0,
-      data.paymentMethod || null
+      data.paymentMethod || null,
+      data.provider ? String(data.provider).toLowerCase() : null
     );
 
     return this.getById(result.lastInsertRowid);
@@ -418,12 +451,117 @@ const DonationRepository = {
       LIMIT ?
     `);
     return stmt.all(minAgeMinutes, maxAgeHours, limit);
+  },
+
+  /**
+   * Récupère les transactions en attente depuis trop longtemps.
+   *
+   * Une transaction qui reste 'pending' au-delà de quelques minutes n'est pas
+   * forcément anormale (un push Mobile Money peut tarder), mais au-delà d'une
+   * demi-heure c'est exactement le symptôme du 2026-09-27 : un paiement
+   * réellement encaissé par FedaPay que rien n'a jamais comptabilisé. C'est ce
+   * que le watchdog surveille.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.minAgeMinutes=30]
+   * @param {number} [options.limit=50]
+   * @returns {Array<Object>} lignes enrichies de son âge en minutes
+   */
+  getStalePendingDonations({ minAgeMinutes = 30, limit = 50 } = {}) {
+    const stmt = db.prepare(`
+      SELECT id, transaction_id, reference, firstname, lastname, phone, email,
+             amount, status, payment_method, created_at,
+             CAST((julianday('now') - julianday(created_at)) * 24 * 60 AS INTEGER) AS age_minutes
+      FROM donations
+      WHERE status = 'pending'
+        AND transaction_id IS NOT NULL
+        AND created_at <= datetime('now', '-' || ? || ' minutes')
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+    return stmt.all(Math.max(parseInt(minAgeMinutes, 10) || 30, 1), Math.max(parseInt(limit, 10) || 50, 1));
+  },
+
+  /**
+   * Relevé COMPLET des souscriptions, tous statuts confondus.
+   *
+   * Réservé à l'export CSV d'organisation : la liste publique
+   * (`getPublicSubscribers`) ne montre, elle, que les dons approuvés et
+   * anonymise ce que le donateur a choisi de masquer. Ici, on restitue la
+   * vérité du terrain (coordonnées, messages, statuts terminaux) pour
+   * rapprocher les encaissements du dashboard FedaPay.
+   *
+   * Colonnes volontairement EXCLUES, car sans utilité dans un relevé et
+   * inutiles en cas de fuite : `feda_token` (jeton de checkout) et
+   * `receipt_token_hash` (empreinte du jeton de reçu). Un export ne doit
+   * jamais pouvoir servir à quoi que ce soit d'autre qu'un rapprochement
+   * comptable.
+   *
+   * @param {{limit?: number}} [options]
+   * @returns {Array<Object>}
+   */
+  getAllDonations({ limit = 10000 } = {}) {
+    const stmt = db.prepare(`
+      SELECT
+        id, transaction_id, reference, firstname, lastname, phone, email,
+        amount, currency, message, is_public, hide_amount, status,
+        payment_method, created_at, updated_at
+      FROM donations
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(Math.max(parseInt(limit, 10) || 10000, 1));
+  },
+
+  /**
+   * Date de création de la dernière transaction, quel que soit son statut.
+   * Permet de distinguer « le webhook est muet parce que personne ne donne »
+   * (pas d'alerte) de « le webhook est muet alors qu'on reçoit des dons »
+   * (alerte : les notifications sont cassées).
+   * @returns {string|null} horodatage SQLite 'YYYY-MM-DD HH:MM:SS' (UTC)
+   */
+  getLastDonationCreatedAt() {
+    const row = db.prepare('SELECT MAX(created_at) AS last FROM donations').get();
+    return row?.last || null;
+  }
+};
+
+/**
+ * État applicatif persistant (clé/valeur).
+ * Utilisé pour l'observation : horodatage du dernier webhook, du dernier
+ * cycle de réconciliation, etc. Volontairement isolé de `donations`.
+ */
+const StateRepository = {
+  /**
+   * @param {string} key
+   * @returns {string|null}
+   */
+  get(key) {
+    if (!key) return null;
+    const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(String(key));
+    return row?.value ?? null;
+  },
+
+  /**
+   * @param {string} key
+   * @param {string} value
+   */
+  set(key, value) {
+    if (!key) return null;
+    const stmt = db.prepare(`
+      INSERT INTO app_state (key, value, updated_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+    `);
+    stmt.run(String(key), value === null || value === undefined ? null : String(value));
+    return this.get(key);
   }
 };
 
 module.exports = {
   db,
   DonationRepository,
+  StateRepository,
   issueReceiptToken,
   hashReceiptToken,
   safeCompareHash

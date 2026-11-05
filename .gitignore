@@ -20,3 +20,6 @@ Thumbs.db
 
 # Scripts de diagnostic (scratch)
 scratch/
+
+# Sauvegardes de .env : ne jamais versionner (contiennent les clés FedaPay et Discord)
+.env.bak*

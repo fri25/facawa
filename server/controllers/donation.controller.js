@@ -3,7 +3,8 @@
  */
 
 const { DonationRepository } = require('../config/database');
-const fedapayService = require('../services/fedapay.service');
+// Façade de paiement : délègue à FedaPay ou Moneroo selon PAYMENT_PROVIDER.
+const paymentService = require('../services/payment.service');
 
 /**
  * Construit la réponse "reçu" d'une donation.
@@ -80,8 +81,9 @@ const DonationController = {
       }
       const callbackUrl = `${appUrl}/confirmation.html`;
 
-      // 1. Appel API FedaPay pour créer la transaction et obtenir le token
-      const fedaResponse = await fedapayService.createTransaction({
+      // 1. Appel au fournisseur de paiement actif (FedaPay ou Moneroo) pour
+      //    créer la transaction et, le cas échéant, obtenir le token Checkout.
+      const paymentResponse = await paymentService.createTransaction({
         amount: data.amount,
         description: `Souscription FeCAWa 2026 - ${data.firstname} ${data.lastname}`,
         customer: {
@@ -103,8 +105,8 @@ const DonationController = {
       //    propriété de la transaction, sans laquelle l'API ne divulguera
       //    aucune donnée personnelle sur cette donation.
       const { donation: localDonation, receiptToken } = DonationRepository.createPendingDonation({
-        transactionId: fedaResponse.id,
-        reference: fedaResponse.reference,
+        transactionId: paymentResponse.id,
+        reference: paymentResponse.reference,
         firstname: data.firstname,
         lastname: data.lastname,
         phone: data.phone,
@@ -114,20 +116,28 @@ const DonationController = {
         message: data.message,
         isPublic: data.isPublic,
         hideAmount: data.hideAmount,
-        fedaToken: fedaResponse.token
+        provider: paymentService.name,
+        fedaToken: paymentResponse.token
       });
 
       console.log(`[Donation] Nouvelle souscription initiée: #${localDonation.id} (${data.amount} FCFA par ${data.firstname})`);
 
-      // 3. Réponse au frontend pour déclencher le widget Checkout.js
+      // 3. Réponse au frontend pour déclencher le paiement (widget Checkout.js
+      //    pour FedaPay, redirection vers checkout_url pour Moneroo).
       return res.status(201).json({
         success: true,
-        transactionId: fedaResponse.id,
-        reference: fedaResponse.reference,
-        token: fedaResponse.token,
-        checkoutUrl: fedaResponse.checkoutUrl,
-        publicKey: process.env.FEDAPAY_PUBLIC_KEY || '',
-        isSimulated: fedaResponse.isSimulated || false,
+        provider: paymentService.name,
+        transactionId: paymentResponse.id,
+        reference: paymentResponse.reference,
+        // token/publicKey sont null avec Moneroo (redirection checkout_url) :
+        // c'est attendu, le frontend s'adapte selon `provider`.
+        token: paymentResponse.token,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        // La clé publique FedaPay n'est pas renvoyée par le service : on lit la
+        // config. Moneroo n'en a pas besoin → null.
+        publicKey: paymentResponse.publicKey
+          || (paymentService.name === 'fedapay' ? (process.env.FEDAPAY_PUBLIC_KEY || '') : null),
+        isSimulated: paymentResponse.isSimulated || false,
         amount: data.amount,
         // Jeton de reçu : à conserver côté navigateur (sessionStorage) puis à
         // renvoyer dans l'en-tête X-Receipt-Token lors des vérifications de
@@ -168,8 +178,13 @@ const DonationController = {
       // 1. Vérifier d'abord en base de données locale
       let donation = DonationRepository.getByTransactionId(id);
 
-      // Si le don est déjà dans un statut terminal (approuvé, refusé, annulé), renvoyer immédiatement
-      if (donation && ['approved', 'declined', 'canceled'].includes(donation.status)) {
+      // Si le don est déjà dans un statut terminal (approuvé, refusé, annulé),
+      // renvoyer immédiatement.
+      // `expired` est terminal lui aussi : la fenêtre de paiement FedaPay est
+      // fermée, la transaction ne peut plus jamais aboutir. Sans cette mention,
+      // le donataire restait 33 s sur un « contrôle en cours » pour un paiement
+      // qui, lui, avait expiré — et la réconciliation pouvait le rouvrir.
+      if (donation && ['approved', 'declined', 'canceled', 'expired'].includes(donation.status)) {
         return res.json({
           success: true,
           status: donation.status,
@@ -212,19 +227,19 @@ const DonationController = {
 
       recentExternalChecks.set(id, now);
 
-      // 3. Interroger FedaPay
+      // 3. Interroger le fournisseur de paiement actif
       try {
-        const fedaTx = await fedapayService.getTransaction(id);
-        const status = fedaTx.status; // approved, pending, declined, etc.
+        const providerTx = await paymentService.getTransaction(id);
+        const status = providerTx.status; // approved, pending, declined, etc.
 
         if (status === 'approved') {
-          donation = DonationRepository.updateStatus(id, 'approved', fedaTx.mode || 'mobile_money');
-          console.log(`[Donation] ✅ Transaction #${id} confirmée par FedaPay comme 100% effective. Somme créditée à la cagnotte.`);
-        } else if (status === 'declined' || status === 'canceled') {
+          donation = DonationRepository.updateStatus(id, 'approved', providerTx.mode || 'mobile_money');
+          console.log(`[Donation] ✅ Transaction #${id} confirmée par le fournisseur comme 100% effective. Somme créditée à la cagnotte.`);
+        } else if (status === 'declined' || status === 'canceled' || status === 'expired') {
           donation = DonationRepository.updateStatus(id, status);
           console.log(`[Donation] ⚠️ Transaction #${id} non aboutie (${status}). Non comptabilisée dans la cagnotte.`);
         } else {
-          donation = DonationRepository.updateStatus(id, 'pending', fedaTx.mode || 'mobile_money');
+          donation = DonationRepository.updateStatus(id, 'pending', providerTx.mode || 'mobile_money');
           console.log(`[Donation] ⏳ Transaction #${id} toujours en attente (${status}). La cagnotte reste inchangée.`);
         }
 
@@ -234,8 +249,8 @@ const DonationController = {
           owned: true,
           donation: privateReceiptView(donation, true)
         });
-      } catch (fedaErr) {
-        // En cas d'erreur de contact FedaPay, retourner l'état local actuel
+      } catch (providerErr) {
+        // En cas d'erreur de contact du fournisseur, retourner l'état local actuel
         return res.json({
           success: true,
           status: donation?.status || 'pending',

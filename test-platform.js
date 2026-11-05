@@ -418,6 +418,262 @@ async function runTests() {
     assert(reconcilRes !== undefined && reconcilRes.checked >= 0, '[#12] Service de réconciliation des transactions pending opérationnel');
 
     // =========================================================================
+    // EXPORT CSV ORGANISATION (jeton secret) + WATCHDOG CAGNOTTE
+    // =========================================================================
+    console.log('\n📊 Tests de l\'export CSV et du watchdog de surveillance...');
+
+    const { DonationRepository: DonationRepositoryForTests } = require('./server/config/database');
+    const EXPORT_TOKEN = 'test_export_token_0123456789abcdef0123456789';
+    // Doit être défini AVANT le tout premier appel : le contrôleur relit
+    // process.env à chaque requête, mais l'exigence de jeton est testée ici.
+    process.env.FECAWAY_EXPORT_TOKEN = EXPORT_TOKEN;
+
+    // Donateur témoin, créé pour prouver que l'export restitue bien l'identité
+    // complète (contrairement à la liste publique, anonymisée).
+    const EXPORT_DONOR_PHONE = '0197000001';
+    DonationRepositoryForTests.createPendingDonation({
+      transactionId: `sim_export_witness_${Date.now()}`,
+      firstname: 'Rokiatou',
+      lastname: 'Ecoutin',
+      phone: EXPORT_DONOR_PHONE,
+      email: 'rokiatou@example.org',
+      amount: 3000,
+      message: 'Bravo pour le festival',
+      isPublic: 1,
+      hideAmount: 0
+    });
+
+    // --- Export : accès refusé sans jeton ------------------------------------
+    let exportNoTokenStatus = 0;
+    try {
+      await axios.get(`${baseUrl}/api/admin/export.csv`);
+    } catch (err) {
+      exportNoTokenStatus = err.response?.status || 0;
+    }
+    assert(exportNoTokenStatus === 401, 'Export CSV refusé sans jeton (HTTP 401)');
+
+    // --- Export : refusé avec un jeton faux ---------------------------------
+    let exportBadTokenStatus = 0;
+    try {
+      await axios.get(`${baseUrl}/api/admin/export.csv`, { headers: { 'X-Export-Token': 'jeton_faux' } });
+    } catch (err) {
+      exportBadTokenStatus = err.response?.status || 0;
+    }
+    assert(exportBadTokenStatus === 401, 'Export CSV refusé avec un jeton invalide (HTTP 401)');
+
+    // --- Export : refusé quand aucun jeton n'est configuré sur le serveur ---
+    const savedExportToken = process.env.FECAWAY_EXPORT_TOKEN;
+    delete process.env.FECAWAY_EXPORT_TOKEN;
+    let exportUnconfiguredStatus = 0;
+    try {
+      await axios.get(`${baseUrl}/api/admin/export.csv`, { headers: { 'X-Export-Token': savedExportToken } });
+    } catch (err) {
+      exportUnconfiguredStatus = err.response?.status || 0;
+    }
+    process.env.FECAWAY_EXPORT_TOKEN = savedExportToken;
+    assert(exportUnconfiguredStatus === 503, 'Export CSV fermé si aucun jeton n\'est configuré (HTTP 503)');
+
+    // --- Export : fermé si le jeton est trop faible --------------------------
+    // Garde-fou anti-human error : un jeton devinable (ici « secret »),
+    // même s'il est « correct », ne doit jamais ouvrir l'export.
+    process.env.FECAWAY_EXPORT_TOKEN = 'secret';
+    let exportWeakTokenStatus = 0;
+    try {
+      await axios.get(`${baseUrl}/api/admin/export.csv`, { headers: { 'X-Export-Token': 'secret' } });
+    } catch (err) {
+      exportWeakTokenStatus = err.response?.status || 0;
+    }
+    process.env.FECAWAY_EXPORT_TOKEN = EXPORT_TOKEN;
+    assert(exportWeakTokenStatus === 503, 'Export CSV refusé si le jeton configuré est trop court (HTTP 503)');
+
+    // --- Export : accepté avec le bon jeton ---------------------------------
+    // `arraybuffer` et non `text` : axios retire le BOM UTF-8 des réponses
+    // texte, ce qui rendrait la vérification ci-dessous impossible.
+    const exportRes = await axios.get(`${baseUrl}/api/admin/export.csv`, {
+      headers: { 'X-Export-Token': EXPORT_TOKEN },
+      responseType: 'arraybuffer'
+    });
+    const exportBytes = Buffer.from(exportRes.data);
+    const exportBody = exportBytes.toString('utf8');
+    assert(exportRes.status === 200, 'Export CSV servi avec le bon jeton (HTTP 200)');
+    assert(
+      String(exportRes.headers['content-type'] || '').includes('text/csv'),
+      'Export CSV servi avec le bon Content-Type'
+    );
+    assert(
+      String(exportRes.headers['content-disposition'] || '').includes('attachment'),
+      'Export CSV téléchargé en fichier joint (Content-Disposition attachment)'
+    );
+    assert(
+      String(exportRes.headers['cache-control'] || '').includes('no-store'),
+      'Export CSV jamais mis en cache (PII)'
+    );
+    // BOM UTF-8 = EF BB BF en tête de fichier : sans lui, Excel affiche les
+    // accents des noms de donateurs en charabia.
+    assert(
+      exportBytes[0] === 0xef && exportBytes[1] === 0xbb && exportBytes[2] === 0xbf,
+      'Export CSV préfixé d\'un BOM UTF-8 (accents corrects dans Excel)'
+    );
+    assert(exportBody.includes('transaction_id') && exportBody.includes('statut'), 'Export CSV contient les en-têtes de colonnes attendus');
+    assert(exportBody.split('\n').length >= 2, 'Export CSV contient au moins une ligne de données');
+    assert(!exportBody.includes('receipt_token') && !exportBody.includes('feda_token'), 'Export CSV n\'expose ni le jeton de reçu ni le jeton de checkout');
+    assert(
+      exportBody.includes('Ecoutin') && exportBody.includes(EXPORT_DONOR_PHONE),
+      'Export CSV restitue l\'identité et le téléphone du donateur (vue organisation complète)'
+    );
+    assert(
+      /"expired"|"approved"|"pending"/.test(exportBody),
+      'Export CSV distingue les statuts des transactions'
+    );
+
+    // --- Export : la page dédiée est servie et non indexée ------------------
+    const exportPageRes = await axios.get(`${baseUrl}/export.html`);
+    assert(exportPageRes.status === 200, 'Page /export.html servie');
+    assert(
+      /name="robots"\s+content="noindex/.test(String(exportPageRes.data || '')),
+      'Page /export.html déclarée noindex dans son contenu HTML'
+    );
+    assert(
+      String(exportPageRes.headers['x-robots-tag'] || '').includes('noindex'),
+      'Page /export.html porte aussi X-Robots-Tag: noindex (défense en profondeur)'
+    );
+    assert(
+      String(exportPageRes.headers['cache-control'] || '').includes('no-store'),
+      'Page /export.html jamais mise en cache'
+    );
+    assert(
+      !String(exportPageRes.data || '').includes('FECAWAY_EXPORT_TOKEN='),
+      'La page d\'export ne contient aucun jeton en clair'
+    );
+
+    // --- Watchdog : détection d'un paiement resté en attente -----------------
+    const watchdogService = require('./server/services/watchdog.service');
+    const alertService = require('./server/services/alert.service');
+    const { db, DonationRepository, StateRepository } = require('./server/config/database');
+
+    // Un don « pending » vieux de 2 h reproduit exactement le symptôme du
+    // 2026-09-27 : un paiement que personne n'a comptabilisé.
+    const staleTxId = `sim_stale_watchdog_${Date.now()}`;
+    DonationRepository.createPendingDonation({
+      transactionId: staleTxId,
+      firstname: 'Awa',
+      lastname: 'Watchdog',
+      phone: '0197512345',
+      amount: 2500,
+      isPublic: 1,
+      hideAmount: 0
+    });
+    db.prepare("UPDATE donations SET created_at = datetime('now', '-2 hours') WHERE transaction_id = ?").run(staleTxId);
+
+    // Canal d'alerte factice pour ne rien envoyer pendant les tests : le
+    // service d'alerte est mis en mode sec (URL absente) par le harnais.
+    const savedAlertUrl = process.env.ALERT_DISCORD_WEBHOOK_URL;
+    delete process.env.ALERT_DISCORD_WEBHOOK_URL;
+    alertService.webhookUrl = '';
+
+    const firstReport = await watchdogService.check();
+    assert(
+      firstReport.conditions.includes('pending_stale'),
+      '[Watchdog] Détecte un don resté « pending » au-delà du seuil'
+    );
+    assert(
+      firstReport.sent.includes('pending_stale'),
+      '[Watchdog] Annonce la condition une seule fois'
+    );
+    assert(
+      JSON.stringify(watchdogService.getActiveAlerts()).includes('pending_stale'),
+      '[Watchdog] Mémorise la condition active (anti-spam et résolution)'
+    );
+
+    const secondReport = await watchdogService.check();
+    assert(
+      secondReport.sent.length === 0,
+      '[Watchdog] Ne renvoie pas la même alerte au cycle suivant'
+    );
+    assert(
+      secondReport.conditions.includes('pending_stale'),
+      '[Watchdog] La condition reste détectée tant que le problème existe'
+    );
+
+    // --- Watchdog : alerte de résolution -------------------------------------
+    DonationRepository.updateStatus(staleTxId, 'approved', 'mtn_open');
+    const thirdReport = await watchdogService.check();
+    assert(
+      !thirdReport.conditions.includes('pending_stale'),
+      '[Watchdog] Condition levée une fois le don comptabilisé'
+    );
+    assert(
+      !JSON.stringify(watchdogService.getActiveAlerts()).includes('pending_stale'),
+      '[Watchdog] Oublie la condition résolue'
+    );
+    db.prepare('DELETE FROM donations WHERE transaction_id = ?').run(staleTxId);
+    if (savedAlertUrl !== undefined) process.env.ALERT_DISCORD_WEBHOOK_URL = savedAlertUrl;
+
+    // --- Watchdog : le webhook reçu est horodaté -----------------------------
+    watchdogService.noteWebhookReceived();
+    const freshWebhookAt = StateRepository.get('last_webhook_at');
+    assert(Boolean(freshWebhookAt), '[Watchdog] Horodate la réception d\'une notification FedaPay');
+    // La valeur est un horodatage UTC SQLite : on vérifie qu'il est RÉCENT
+    // (et non différent de l'avant, qui peut être identique si le webhook de
+    // test vient de passer dans la même seconde).
+    const webhookAgeSeconds = freshWebhookAt
+      ? Math.abs(Date.now() - new Date(`${freshWebhookAt.replace(' ', 'T')}Z`).getTime()) / 1000
+      : Infinity;
+    assert(webhookAgeSeconds < 120, '[Watchdog] L\'horodatage du dernier webhook est bien actualisé');
+
+    // --- Watchdog : détection des notifications REJETÉES ---------------------
+    // C'est le contrôle le plus important : FedaPay livre, le serveur refuse
+    // (secret webhook ≠ secret du point de terminaison). La panne est alors
+    // totalement muette, et c'est ce qui a gelé la cagnotte le 2026-09-27.
+    const { WEBHOOK_REJECTED_THRESHOLD } = require('./server/services/watchdog.service');
+    for (let i = 0; i < WEBHOOK_REJECTED_THRESHOLD; i++) {
+      watchdogService.noteWebhookRejected({ ip: '198.51.100.7', userAgent: 'FedaPay/1.0' });
+    }
+    const rejectedReport = await watchdogService.check();
+    assert(
+      rejectedReport.conditions.includes('webhook_rejected'),
+      '[Watchdog] Détecte les notifications FedaPay rejetées pour signature invalide'
+    );
+    assert(
+      JSON.stringify(watchdogService.getActiveAlerts()).includes('webhook_rejected'),
+      '[Watchdog] Mémorise la condition « notifications rejetées »'
+    );
+
+    // Une notification VALIDE doit faire disparaître la condition : c'est la
+    // preuve que le canal est de nouveau opérationnel.
+    watchdogService.noteWebhookReceived();
+    const recoveredReport = await watchdogService.check();
+    assert(
+      !recoveredReport.conditions.includes('webhook_rejected'),
+      '[Watchdog] Levée de l\'alerte après réception d\'une notification valide'
+    );
+    assert(
+      !JSON.stringify(watchdogService.getActiveAlerts()).includes('webhook_rejected'),
+      '[Watchdog] Oublie la condition « notifications rejetées » une fois le canal rétabli'
+    );
+
+    // --- Watchdog : RAS quand tout est cohérent ------------------------------
+    const quietReport = await watchdogService.check();
+    assert(
+      !quietReport.conditions.includes('pending_stale'),
+      '[Watchdog] Aucune fausse alerte quand la cagnotte est à jour'
+    );
+
+    // --- Service d'alerte : le secret Discord n'est jamais journalisé --------
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/123456789/Sup3rSecretTokenValue';
+    alertService.webhookUrl = discordWebhookUrl;
+    const target = alertService.describeTarget();
+    assert(!target.includes('Sup3rSecretTokenValue'), '[Alerte] La clé du webhook Discord n\'apparaît jamais dans les logs');
+    assert(alertService.isConfigured() === true, '[Alerte] Une URL de webhook Discord valide est détectée');
+    alertService.webhookUrl = 'https://example.com/pas-discord';
+    assert(alertService.isConfigured() === false, '[Alerte] Une URL qui n\'est pas Discord est refusée');
+    alertService.webhookUrl = savedAlertUrl || '';
+
+    // --- Page d'accueil : aucun lien vers l'export ---------------------------
+    const homeRes = await axios.get(`${baseUrl}/`);
+    assert(!String(homeRes.data || '').includes('export.html'), 'La page d\'accueil ne renvoie pas vers la page d\'export');
+
+    // =========================================================================
     // TESTS COMPLÉMENTAIRES : ISSUES #6, #13, #7
     // =========================================================================
     console.log('\n🛡️ Tests de rate limiting et d\'étanchéité IP (#6, #13, #7)...');

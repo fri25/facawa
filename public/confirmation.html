@@ -186,7 +186,9 @@
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
       const urlParams = new URLSearchParams(window.location.search);
-      const rawTxId = urlParams.get('id');
+      // FedaPay renvoie ?id=<txId> ; Moneroo renvoie ?paymentId=<id>&paymentStatus=<...>.
+      const rawTxId = urlParams.get('id') || urlParams.get('paymentId');
+      const monerooStatus = urlParams.get('paymentStatus');
       const txId = (rawTxId && rawTxId.trim() !== '' && rawTxId !== 'demo') ? rawTxId.trim() : null;
 
       // Éléments DOM
@@ -234,6 +236,22 @@
       let pollCount = 0;
       const pollDelays = [2000, 3000, 4000, 6000, 8000, 10000]; // 6 vérifications échelonnées (~33 s max)
       const maxPolls = pollDelays.length;
+
+      // Statut de retour renvoyé par Moneroo : sert d'affichage initial optimiste,
+      // immédiatement corrigé par la vérification serveur ci-dessous (le serveur
+      // reste seul juge du statut définitif du paiement).
+      if (monerooStatus) {
+        const normalizedStatus = monerooStatus.toLowerCase();
+        if (normalizedStatus === 'success') {
+          renderApprovedState(null, txId, false);
+        } else if (normalizedStatus === 'failed' || normalizedStatus === 'cancelled' || normalizedStatus === 'canceled') {
+          renderDeclinedState(normalizedStatus === 'failed' ? 'declined' : 'canceled');
+        } else {
+          // initiated, pending ou statut inconnu : on reste sur l'état de contrôle.
+          renderPendingState('Paiement initié, contrôle du débit en cours...');
+        }
+      }
+
       checkPaymentStatus();
 
       async function checkPaymentStatus() {
@@ -255,8 +273,8 @@
             return;
           }
 
-          // B. Paiement refusé ou annulé
-          if (status === 'declined' || status === 'canceled') {
+          // B. Paiement refusé, annulé ou expiré
+          if (status === 'declined' || status === 'canceled' || status === 'expired') {
             renderDeclinedState(status);
             return;
           }
@@ -426,8 +444,12 @@
           </svg>
         `;
 
-        confirmationTitle.textContent = 'Paiement non abouti ou annulé';
-        confirmationSubtitle.textContent = 'La transaction n\'a pas pu être validée par l\'opérateur.';
+        confirmationTitle.textContent = status === 'expired'
+          ? 'Session de paiement expirée'
+          : 'Paiement non abouti ou annulé';
+        confirmationSubtitle.textContent = status === 'expired'
+          ? 'Le délai de validation de la transaction est dépassé, sans qu\'aucun montant n\'ait été débité.'
+          : 'La transaction n\'a pas pu être validée par l\'opérateur.';
 
         receiptHeaderTitle.textContent = 'Résultat de la transaction';
         receiptStatusBadge.className = 'receipt-badge error';
@@ -437,7 +459,16 @@
         statusAlertBox.style.background = '#fdf2f2';
         statusAlertBox.style.border = '1px solid #f5c2c2';
         statusAlertBox.style.color = '#9b1c1c';
-        statusAlertBox.innerHTML = `
+        statusAlertBox.innerHTML = status === 'expired'
+          ? `
+          <strong>⏳ Session expirée :</strong>
+          <p style="margin-top:6px; font-size:0.92rem;">
+            Le prestataire de paiement n'a reçu la validation dans le délai imparti, donc la transaction a été close automatiquement.
+            <br><strong>Aucun montant n'a été prélevé et la cagnotte n'a subi aucune modification.</strong>
+            Relancez votre don pour obtenir un nouveau lien de paiement.
+          </p>
+        `
+          : `
           <strong>❌ Aucun montant prélevé :</strong>
           <p style="margin-top:6px; font-size:0.92rem;">
             L'opération a été annulée ou refusée par le réseau (solde insuffisant, code PIN erroné ou délai dépassé).

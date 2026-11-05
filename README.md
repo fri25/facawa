@@ -27,10 +27,16 @@ fecawa/
 │   ├── config/
 │   │   └── database.js              # Initialisation SQLite, schémas, index et repository (DAO)
 │   ├── services/
-│   │   └── fedapay.service.js       # Client API FedaPay (transactions, tokens, vérification)
+│   │   ├── fedapay.service.js       # Client API FedaPay (transactions, tokens, vérification)
+│   │   ├── reconciliation.service.js # Rattrapage des transactions en attente (cyclique)
+│   │   ├── watchdog.service.js      # Détecte les encaissements non comptabilisés
+│   │   ├── alert.service.js         # Alertes Discord (embeds, anti-spam, secret jamais loggé)
+│   │   ├── client-ip.service.js      # IP client non falsifiable (Cloudflare → Traefik → app)
+│   │   └── phone.service.js          # Normalisation du numéro de téléphone par pays
 │   ├── controllers/
 │   │   ├── donation.controller.js   # Création de don, vérification, flux souscripteurs
-│   │   └── webhook.controller.js    # Réception et validation du Webhook transaction.approved
+│   │   ├── webhook.controller.js    # Réception et validation du Webhook transaction.approved
+│   │   └── export.controller.js     # Relevé CSV complet protégé par jeton secret
 │   ├── routes/
 │   │   └── api.js                   # Routes REST (/api/create-transaction, /api/webhook/..., etc.)
 │   └── middleware/
@@ -161,6 +167,108 @@ Si vous testez en local sur votre machine, utilisez [ngrok](https://ngrok.com/) 
 ngrok http 3000
 ```
 Copiez l'URL HTTPS fournie par ngrok (ex: `https://abcd-123.ngrok-free.app`) et configurez `https://abcd-123.ngrok-free.app/api/webhook/fedapay` dans le dashboard FedaPay.
+
+### D. ⚠️ Trois pièges qui bloquent la cagnotte (incident du 27/09/2026)
+
+Le 27 septembre 2026, des paiements étaient réellement encaissés par FedaPay tandis que le compteur du site restait bloqué à 0. Les trois causes se cumulaient, et **aucune ne venait du code applicatif** :
+
+1. **L'URL du webhook pointait vers la racine du site** (`https://fecawa.com/`) au lieu de `/api/webhook/fedapay`. Les notifications partaient sur la page d'accueil.
+2. **Le webhook avait été auto-désactivé** par FedaPay après ces erreurs (`disable_on_error`). Résultat : plus aucune notification, et rien sur le site pour le signaler.
+3. **Le routeur Cloudflare-only rejetait FedaPay en amont** : le middleware Traefik `fecawa-cfonly` (voir `compose.yml`) refuse toute requête dont l'IP source n'est pas une IP Cloudflare, or les serveurs FedaPay ne passent pas par Cloudflare. Vérification : `curl --resolve votre-domaine:443:<IP_DU_SERVEUR> -X POST https://votre-domaine/api/webhook/fedapay` → `403`.
+
+Le correctif appliqué :
+- un routeur Traefik dédié `fecawa-webhook`, restreint par `PathPrefix(/api/webhook)` et **sans** l'ipwhitelist Cloudflare — le reste du site reste accessible uniquement via Cloudflare. L'endpoint reste protégé par l'en-tête secret `X-Fecawa-Gate` (anti-accès des autres conteneurs du réseau partagé), par la **signature HMAC-SHA256 obligatoire avec timestamp frais** et par son propre rate-limit ;
+- `disable_on_error` désactivé chez FedaPay, pour qu'une erreur réseau n'arrête plus silencieusement la collecte ;
+- une **réconciliation automatique** (`RECONCILIATION_*`, voir `.env.example`) qui interroge FedaPay toutes les 10 minutes pour les transactions restées `pending` : c'est le second filet de sécurité, indispensable quand la notification est perdue, quand le donataire ferme l'onglet, ou quand le webhook est mal configuré.
+
+**Vérification rapide après toute modification du webhook :**
+```bash
+# Test de bout en bout, une seule commande : FedaPay envoie un événement officiel
+# signé avec le VRAI secret de l'endpoint, et le script dit si le serveur l'accepte.
+./verifier-webhook.sh
+#   « le canal de notification fonctionne »  → exit 0
+#   « FedaPay livre, le serveur refuse »     → exit 2 (secret à corriger)
+
+# Pour les diagnostics manuels :
+# 1. Le webhook FedaPay est-il actif et sur la bonne URL ?
+curl -s -H "Authorization: Bearer $FEDAPAY_SECRET_KEY" https://api.fedapay.com/v1/webhooks
+#    → "url":"https://votre-domaine.org/api/webhook/fedapay", "enabled":true
+
+# 2. L'endpoint répond-il hors Cloudflare (comme FedaPay) ?
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://votre-domaine.org/api/webhook/fedapay
+#    → 401 Signature invalide = REÇU par l'application. 403 = bloqué par Traefik.
+```
+Et dans les logs du conteneur, toute notification donne une ligne `[Webhook] Notification FedaPay reçue.` En cas de paiement encaissé mais non compté, cette ligne est le point de départ.
+
+---
+
+## 🚨 Surveillance de la cagnotte (watchdog) et alertes
+
+Deux filets (webhook, réconciliation) ne suffisent pas : ils peuvent tomber en même temps, silencieusement. Le watchdog est le troisième — il **détecte qu'un encaissement n'a pas été comptabilisé et prévient un humain sur Discord**.
+
+Il tourne à la fin de chaque cycle de réconciliation (toutes les 10 min) et surveille quatre conditions :
+
+| Condition | Sévérité | Déclencheur | Sens |
+|---|---|---|---|
+| `pending_stale` | 🚨 critique | un don `pending` depuis plus de `ALERT_PENDING_MINUTES` (30 min) | paiement encaissé non comptabilisé |
+| `webhook_silent` | 🚨 critique | aucune notification depuis `ALERT_WEBHOOK_SILENT_HOURS` (2 h) **alors que des dons arrivent** | canal de notification cassé |
+| `webhook_rejected` | 🚨 critique | `ALERT_WEBHOOK_REJECTED` (3) notifications rejetées pour signature invalide | **FedaPay livre, le serveur refuse** |
+| `feda_unreachable` | 🚨 critique | `ALERT_RECONCILIATION_ERRORS` (3) cycles de réconciliation ratés d'affilée | filet de sécurité aveugle |
+| `quota_low` | ⚠️ avertissement | budget d'appels FedaPay à 90 % | la réconciliation va échouer en bloc |
+
+### ⚠️ `webhook_rejected` : le piège du secret par point de terminaison
+
+**Chaque point de terminaison FedaPay a son PROPRE secret** (unique, et différent entre le mode test et le mode live). Si `FEDAPAY_WEBHOOK_SECRET` ne correspond pas à l'endpoint configuré, FedaPay livre normalement ses notifications et le serveur les refuse **toutes** : la cagnotte reste figée, silencieusement, et le tableau de bord FedaPay affiche un webhook actif et une URL qui répond.
+
+C'est exactement ce qui est arrivé le 2026-09-27. Le watchdog compte désormais les refus et trace leur source (IP + User-Agent) : l'alerte part sur Discord dès le 3ᵉ refus, avec l'action à faire :
+
+> Workbench → Webhooks → ton endpoint → « Click to reveal » → remplacer `FEDAPAY_WEBHOOK_SECRET` dans le `.env` → recréer le conteneur.
+
+Le compteur ne se remet à zéro que sur une notification **valide** : la levée de l'alerte est donc la preuve que le canal est rétabli.
+
+Chaque condition n'est annoncée **qu'à son apparition**, jamais à chaque cycle (anti-spam, `ALERT_COOLDOWN_MINUTES`), et sa disparition déclenche une alerte **« Résolu »** : sans cela, impossible de savoir si la panne est finie.
+
+**Configurer Discord** : dans Discord, *Paramètres du salon → Intégrations → Webhooks → Nouveau webhook*, puis copier l'URL dans `.env` :
+```env
+ALERT_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/…
+```
+Sans cette variable, le watchdog fonctionne en **mode sec** : les alertes apparaissent uniquement dans les logs (`docker logs fecawa | grep "\[Alerte\]"`). L'URL du webhook est un secret : elle n'est **jamais** journalisée, et seule une URL de `discord.com` / `discordapp.com` est acceptée (pas de SSRF possible par configuration).
+
+Aucune donnée nominative ne part sur Discord : uniquement identifiant de transaction, montant et ancienneté. Le nom du donataire se retrouve dans l'export ou Adminer.
+
+---
+
+## 📊 Export CSV des souscriptions (réservé à l'organisation)
+
+Page : **`https://fecawa.com/export.html`** — non liée depuis le site, `noindex` + `X-Robots-Tag: noindex`, `Cache-Control: no-store`.
+
+Le relevé est **complet** : tous les statuts (encaissé, expiré, refusé, en attente), avec nom, prénom, téléphone, e-mail, message, référence FedaPay et moyen de paiement. C'est la vue du rapprochement comptable et de l'émission des reçus — pas la liste publique, anonymisée.
+
+### Générer le jeton d'accès
+```bash
+openssl rand -hex 24      # 48 caractères
+```
+puis dans `.env` :
+```env
+FECAWAY_EXPORT_TOKEN=<le jeton généré>
+```
+
+Le jeton n'est **jamais accepté en URL** (ni logs d'accès, ni historique, ni `Referer`) : la page le place dans l'en-tête `X-Export-Token`, et le téléchargement se fait en un clic.
+
+### Sécurité de l'export
+
+| Protection | Mise en œuvre |
+|---|---|
+| Jeton secret | comparaison **en temps constant**, jamais journalisé |
+| Longueur minimale | 32 caractères minimum : un jeton faible renvoie `503` et n'ouvre **rien** (pas d'acceptation silencieuse) |
+| Absent | `503` — l'export est fermé par défaut, jamais ouvert par oubli de configuration |
+| Déni de service | rate-limit dédié : 20 tentatives / 15 min / IP |
+| Réseau | routeur Traefik du site, accessible **uniquement via Cloudflare** ; les autres conteneurs du réseau partagé sont bloqués (`fecawa-gate`) |
+| Fuite en cache | `Cache-Control: no-store` + `X-Content-Type-Options: nosniff` |
+| Données minimisées | ni `feda_token` ni empreinte du jeton de reçu dans le fichier |
+| Indexation | page non liée, `noindex` (HTML + en-tête HTTP) |
+
+**Risques résiduels assumés** : le jeton est mémorisé dans le `sessionStorage` de l'onglet (comme le jeton de reçu des dons) ; si le site était un jour compromis par une XSS, ce jeton serait exposé — il suffit alors de le régénérer et de redémarrer le conteneur. Le CSV contient des données personnelles : à supprimer après usage.
 
 ---
 

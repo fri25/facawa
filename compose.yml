@@ -96,6 +96,40 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
+      # 🚨 Routeur DÉDIÉ au webhook FedaPay (priorité 100 > règle par défaut).
+      #
+      # Constat 2026-09-27 : les paiements étaient encaissés par FedaPay mais la
+      # cagnotte restait à 0. Deux causes cumulées, toutes deux réseau :
+      #   1. `fecawa-cfonly` rejette au niveau Traefik toute requête dont l'IP
+      #      source n'est pas une IP Cloudflare. Les serveurs FedaPay ne passent
+      #      PAS par Cloudflare : vérifié en direct sur l'origin
+      #      (`curl --resolve fecawa.com:443:<IP> -X POST /api/webhook/fedapay`
+      #      → 403). Un webhook ne peut donc jamais transiter par ce routeur.
+      #   2. Le webhook configuré chez FedaPay pointait vers
+      #      `https://facawa.com/` (la page d'accueil) au lieu de l'endpoint, et
+      #      avait été auto-désactivé après erreur (disable_on_error).
+      #      Aucune ligne `[Webhook]` n'a jamais été loggée : la notification
+      #      n'arrivait pas du tout.
+      #
+      # D'où ce routeur séparé, restreint par `PathPrefix` au seul endpoint de
+      # webhook, SANS l'ipwhitelist Cloudflare. Tout le reste du site continue
+      # d'être accessible uniquement via Cloudflare.
+      #
+      # Ce qui protège toujours cet endpoint, désormais hors Cloudflare :
+      #   - `fecawa-gate` : en-tête secret X-Fecawa-Gate surajouté par Traefik,
+      #     donc les autres conteneurs du réseau Docker 'proxy' sont rejetés (403) ;
+      #   - la signature HMAC-SHA256 obligatoire avec timestamp frais
+      #     (server/services/fedapay.service.js) : sans FEDAPAY_WEBHOOK_SECRET,
+      #     personne ne peut forger un « paiement » ; un rejeu est impossible
+      #     (tolérance 300 s) ;
+      #   - le rate-limit dédié appliqué sur ce path (server/server.js).
+      - "traefik.http.routers.fecawa-webhook.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/webhook`)"
+      - "traefik.http.routers.fecawa-webhook.entrypoints=websecure"
+      - "traefik.http.routers.fecawa-webhook.priority=100"
+      - "traefik.http.routers.fecawa-webhook.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fecawa-webhook.service=fecawa"
+      - "traefik.http.routers.fecawa-webhook.middlewares=fecawa-gate"
+
   # Adminer — interface Web (SQLite) sur ${ADMINER_DOMAIN} (fecawadb.fecawa.com)
   adminer:
     build:

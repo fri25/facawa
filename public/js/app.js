@@ -23,8 +23,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const metricProgressBar = document.getElementById('metricProgressBar');
   const recentDonorsFeed = document.getElementById('recentDonorsFeed');
 
-  // Configuration FedaPay chargée depuis le serveur
+  // Configuration publique chargée depuis le serveur
   let publicConfig = null;
+
+  // Prestataire de paiement actif ('fedapay' | 'moneroo'). Initialisé depuis
+  // /api/config, puis confirmé à chaque réponse de /api/create-transaction.
+  // FedaPay ouvre un widget in-page (Checkout.js) ; Moneroo redirige vers une
+  // page de paiement hébergée (checkout_url).
+  let activeProvider = 'fedapay';
 
   // 1. Initialisation : Charger la configuration publique et les donateurs récents
   loadPublicConfig();
@@ -275,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // un secret d'accès au reçu nominatif. Le journaliser dans la console
         // du navigateur l'exposerait à tout partage d'écran ou outil de
         // diagnostic tiers. On ne trace que l'identifiant de transaction.
-        console.log('[Donation] Transaction initialisée avec succès (id=%s)', data.transaction && data.transaction.id);
+        console.log('[Donation] Transaction initialisée avec succès (id=%s)', data.transactionId);
 
         // Jeton de reçu : preuve de propriété de la transaction. Conservé dans
         // sessionStorage (et non un cookie) pour que la page de confirmation,
@@ -291,6 +297,13 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
+        // Le backend fait foi sur le prestataire réellement utilisé : on aligne
+        // le libellé du bouton pour les prochains essais dans ce même onglet.
+        if (data.provider === 'fedapay' || data.provider === 'moneroo') {
+          activeProvider = data.provider;
+          updateDonateButtonLabel(activeProvider);
+        }
+
         // Si la clé FedaPay est en mode simulation / démonstration locale
         if (data.isSimulated) {
           showToast('Mode simulation activé : redirection vers le reçu...', 'success');
@@ -300,7 +313,35 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Lancement du widget FedaPay Checkout.js
+        // Chemin historique : widget FedaPay in-page via Checkout.js. On ne
+        // l'emprunte que si le backend a bien fourni un token ET une clé
+        // publique ET que le SDK Checkout.js est chargé.
+        if (data.token && data.publicKey && typeof FedaPay !== 'undefined') {
+          triggerFedaPayCheckout({
+            transactionId: data.transactionId,
+            token: data.token,
+            publicKey: data.publicKey || publicConfig?.fedapay?.publicKey,
+            amount: data.amount,
+            customer: { firstname, lastname, phone, email },
+            checkoutUrl: data.checkoutUrl
+          });
+          return;
+        }
+
+        // Prestataire par redirection (Moneroo) : pas de widget, on quitte la
+        // page vers la page de paiement hébergée. Le critère reste robuste si
+        // le champ `provider` venait à manquer : absence de token + checkoutUrl.
+        if (data.provider === 'moneroo' || (!data.token && data.checkoutUrl)) {
+          if (data.checkoutUrl) {
+            console.log('[Donation] Redirection vers la page de paiement hébergée du prestataire.');
+            window.location.assign(data.checkoutUrl);
+            return;
+          }
+          throw new Error('Aucun moyen de paiement disponible pour cette transaction.');
+        }
+
+        // Repli : FedaPay sans token exploitable ou SDK absent → dernier appel
+        // (triggerFedaPayCheckout bascule lui-même vers checkoutUrl ou /confirmation).
         triggerFedaPayCheckout({
           transactionId: data.transactionId,
           token: data.token,
@@ -424,6 +465,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  /**
+   * Libellé du bouton de don, adapté au prestataire actif.
+   * FedaPay : mention explicite du widget ; Moneroo / inconnu : libellé neutre.
+   */
+  function updateDonateButtonLabel(provider) {
+    if (!donateBtnText) return;
+    donateBtnText.textContent = provider === 'moneroo' ? 'Faire un don' : 'Faire un don avec FedaPay';
+  }
+
   function setLoading(isLoading) {
     if (!donateBtn) return;
     donateBtn.disabled = isLoading;
@@ -431,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
       donateBtnText.textContent = 'Préparation du paiement...';
       if (donateSpinner) donateSpinner.classList.remove('hidden');
     } else {
-      donateBtnText.textContent = 'Faire un don avec FedaPay';
+      updateDonateButtonLabel(activeProvider);
       if (donateSpinner) donateSpinner.classList.add('hidden');
     }
   }
@@ -444,6 +494,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/config');
       if (res.ok) {
         publicConfig = await res.json();
+        // Le provider est piloté par la config tant qu'aucune transaction n'a
+        // encore été créée (ensuite la réponse d'API fait foi).
+        const configuredProvider = publicConfig?.payment?.provider;
+        if (configuredProvider === 'fedapay' || configuredProvider === 'moneroo') {
+          activeProvider = configuredProvider;
+          updateDonateButtonLabel(activeProvider);
+        }
       }
     } catch (e) {
       console.warn('Impossible de charger /api/config', e);
